@@ -424,6 +424,12 @@ const TABS = [
 
 // ─── Composant PositionsTable avec tri ───────────────────────────────────────
 
+const ASSET_BADGE = {
+  Stock:      { label: "Action",  cls: "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" },
+  Etf:        { label: "ETF",     cls: "bg-teal-500/20 text-teal-300 border border-teal-500/30" },
+  MutualFund: { label: "OPCVM",   cls: "bg-violet-500/20 text-violet-300 border border-violet-500/30" },
+};
+
 function PositionsTable({ positions }) {
   const [sortKey, setSortKey] = useState("pl");
   const [sortDir, setSortDir] = useState("desc");
@@ -447,6 +453,7 @@ function PositionsTable({ positions }) {
     else if (sortKey === "sells") { va = a.sells; vb = b.sells; }
     else if (sortKey === "trades"){ va = a.trades; vb = b.trades; }
     else if (sortKey === "sym")   { va = a.sym; vb = b.sym; return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); }
+    else if (sortKey === "type")  { va = a.assetType || "Stock"; vb = b.assetType || "Stock"; return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); }
     else { va = plA; vb = plB; }
     return sortDir === "asc" ? va - vb : vb - va;
   });
@@ -483,6 +490,9 @@ function PositionsTable({ positions }) {
               <th onClick={() => handleSort("sym")} className={`text-left py-3 px-4 font-semibold cursor-pointer select-none transition-colors hover:text-white text-xs uppercase tracking-wide ${sortKey === "sym" ? "text-white" : "text-indigo-300"}`}>
                 Symbole {sortKey === "sym" ? (sortDir === "desc" ? "↓" : "↑") : <span className="text-white/20">↕</span>}
               </th>
+              <th onClick={() => handleSort("type")} className={`text-left py-3 px-4 font-semibold cursor-pointer select-none transition-colors hover:text-white text-xs uppercase tracking-wide ${sortKey === "type" ? "text-white" : "text-indigo-300"}`}>
+                Type {sortKey === "type" ? (sortDir === "desc" ? "↓" : "↑") : <span className="text-white/20">↕</span>}
+              </th>
               <th className="text-left text-indigo-300 py-3 px-4 font-semibold text-xs uppercase tracking-wide">Nom</th>
               <SortTh label="Achats"   colKey="buys"   tooltip="Montant total investi (achats nets). Cliquez pour trier." />
               <SortTh label="Ventes"   colKey="sells"  tooltip="Montant total encaissé sur les cessions." />
@@ -497,6 +507,9 @@ function PositionsTable({ positions }) {
               return (
                 <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                   <td className="py-2.5 px-4 text-white font-mono font-semibold">{p.sym}</td>
+                  <td className="py-2.5 px-4">
+                    {(() => { const b = ASSET_BADGE[p.assetType] || ASSET_BADGE.Stock; return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${b.cls}`}>{b.label}</span>; })()}
+                  </td>
                   <td className="py-2.5 px-4 text-indigo-200 max-w-xs truncate">{p.name}</td>
                   <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.buys)}</td>
                   <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.sells)}</td>
