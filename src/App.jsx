@@ -1,0 +1,639 @@
+import { useState, useCallback } from "react";
+import * as XLSX from "xlsx";
+import {
+  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
+} from "recharts";
+
+// ─── Formatters ──────────────────────────────────────────────────────────────
+
+const fmtEur = (v) =>
+  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v ?? 0);
+
+const fmtEur2 = (v) =>
+  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v ?? 0);
+
+const fmtPct = (v) => (v >= 0 ? "+" : "") + (v ?? 0).toFixed(2) + " %";
+
+const parseNum = (v) => {
+  if (v == null || v === "" || v === " ") return 0;
+  const n = parseFloat(String(v).replace(",", "."));
+  return isNaN(n) ? 0 : n;
+};
+
+const monthKey = (dateStr) => {
+  if (!dateStr) return "??";
+  const p = String(dateStr).split("-");
+  if (p.length === 3) return `${p[1]}/${p[2]}`;
+  return String(dateStr).slice(0, 7);
+};
+
+const COLORS = ["#6366f1", "#ec4899", "#14b8a6", "#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316"];
+
+const COMPTES_LABELS = {
+  "78800/128275EUR": "Compte Principal EUR",
+  "78800/114395PEA": "PEA",
+  "78800/103879PME": "PEA-PME",
+  "78800/153504EUR": "Compte EUR 2",
+  "78800/167815EUR": "Compte EUR 3",
+};
+
+// ─── Processor ───────────────────────────────────────────────────────────────
+
+function processXLSX(workbook, filterCompte = "ALL") {
+  const sheetMain = workbook.Sheets["Montants cumulés"] || workbook.Sheets[workbook.SheetNames[0]];
+  const sheetPerf = workbook.Sheets["Performance"];
+  const sheetBP   = workbook.Sheets["B P"];
+
+  const toRows = (sheet) => sheet ? XLSX.utils.sheet_to_json(sheet, { defval: null }) : [];
+
+  const mainRows = toRows(sheetMain).filter(r => {
+    if (!r["Date"]) return false;
+    if (filterCompte === "ALL") return true;
+    return r["ID du compte de comptabilisation"] === filterCompte;
+  });
+
+  const positions = {};
+  const months = {};
+  let deposits = 0, withdrawals = 0, dividends = 0, interest = 0, cash = 0;
+  let fees = { commission: 0, tax: 0, exchange: 0, other: 0 };
+
+  mainRows.forEach((row) => {
+    const date = String(row["Date"] || "").trim();
+    const mk = monthKey(date);
+    const type = String(row["Nom du type de montant"] || "").trim();
+    const sym = String(row["Symbole"] || "").trim();
+    const name = String(row["Nom instrument"] || sym || "").trim();
+    const amt = parseNum(row["Montant dans la devise du compte"]);
+    const affecte = String(row["Affecte le solde"] || "").trim().toLowerCase();
+
+    if (!months[mk]) months[mk] = { month: mk, deposits: 0, buys: 0, sells: 0, fees: 0, dividends: 0, interest: 0 };
+
+    if (type === "Cash Amount") {
+      if (amt > 0) { deposits += amt; months[mk].deposits += amt; }
+      else { withdrawals += Math.abs(amt); }
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type === "Client Interest") {
+      interest += amt; months[mk].interest += amt;
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type === "Corporate Actions - Cash Dividends") {
+      dividends += amt; months[mk].dividends += amt;
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type === "Commission" || type === "Client Commission Credit") {
+      fees.commission += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type === "French Financial Transaction Tax") {
+      fees.tax += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type === "Exchange Fee" || type === "External product costs") {
+      fees.exchange += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type.includes("Social Tax") || type.includes("Withholding Tax") || type.includes("Advanced Income Tax")) {
+      fees.other += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if ((type === "Share Amount" || type === "Mutual Funds Traded Value") && sym) {
+      if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0 };
+      const p = positions[sym];
+      p.trades++;
+      if (amt < 0) { p.buys += Math.abs(amt); months[mk].buys += Math.abs(amt); }
+      else { p.sells += amt; months[mk].sells += amt; }
+      p.realized = p.sells - p.buys;
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (affecte === "oui") cash += amt;
+  });
+
+  // TWR officiel Saxo
+  const perfRows = toRows(sheetPerf);
+  const perfSeries = perfRows
+    .filter(r => r["Date"] && r["AccumulatedTimeWeightedTimeSeries"] != null)
+    .map(r => ({
+      date: String(r["Date"]),
+      twr: parseNum(r["AccumulatedTimeWeightedTimeSeries"]),
+      valeur: parseNum(r["AccountValueTimeSeries"]),
+    }));
+  const lastPerf = perfSeries[perfSeries.length - 1];
+  const twr = lastPerf ? lastPerf.twr : 0;
+  const valeurTotale = lastPerf ? lastPerf.valeur : 0;
+
+  // P&L net depuis onglet B/P
+  const bpRows = toRows(sheetBP).filter(r => {
+    if (!r["Date"]) return false;
+    if (filterCompte === "ALL") return true;
+    return r["ID du compte de comptabilisation"] === filterCompte;
+  });
+  const plMap = {};
+  bpRows.forEach(r => {
+    const s = String(r["Symbole"] || "").trim();
+    if (!s) return;
+    if (!plMap[s]) plMap[s] = { sym: s, name: String(r["Nom instrument"] || s), pl: 0 };
+    plMap[s].pl += parseNum(r["Montant dans la devise du compte"]);
+  });
+  Object.values(plMap).forEach(({ sym, name, pl }) => {
+    if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0 };
+    positions[sym].plNet = pl;
+  });
+
+  const totalFees = fees.commission + fees.tax + fees.exchange + fees.other;
+  const netDeposits = deposits - withdrawals;
+  const netResult = dividends + interest + Object.values(positions).reduce((s, p) => s + (p.plNet ?? p.realized), 0) - totalFees;
+  const perfPct = netDeposits > 0 ? (netResult / netDeposits) * 100 : 0;
+
+  const sortedMonths = Object.values(months).sort((a, b) => {
+    const [am, ay] = a.month.split("/");
+    const [bm, by] = b.month.split("/");
+    return ay !== by ? Number(ay) - Number(by) : Number(am) - Number(bm);
+  });
+
+  const allRows = XLSX.utils.sheet_to_json(sheetMain, { defval: null });
+  const comptes = [...new Set(allRows.map(r => r["ID du compte de comptabilisation"]).filter(Boolean))].sort();
+
+  return {
+    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale },
+    positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
+    months: sortedMonths,
+    perfSeries: perfSeries.filter((_, i) => i % 3 === 0),
+    comptes,
+  };
+}
+
+// ─── KPI Card ─────────────────────────────────────────────────────────────────
+
+function KpiCard({ label, value, sub, color = "indigo", icon }) {
+  const colors = {
+    indigo: "from-indigo-500/20 to-indigo-900/10 border-indigo-500/30",
+    pink:   "from-pink-500/20 to-pink-900/10 border-pink-500/30",
+    teal:   "from-teal-500/20 to-teal-900/10 border-teal-500/30",
+    amber:  "from-amber-500/20 to-amber-900/10 border-amber-500/30",
+    green:  "from-green-500/20 to-green-900/10 border-green-500/30",
+    red:    "from-red-500/20 to-red-900/10 border-red-500/30",
+    violet: "from-violet-500/20 to-violet-900/10 border-violet-500/30",
+  };
+  return (
+    <div className={`bg-gradient-to-br ${colors[color] || colors.indigo} border rounded-2xl p-5`}>
+      <div className="flex items-center gap-2 mb-1">
+        {icon && <span className="text-base">{icon}</span>}
+        <span className="text-xs font-semibold uppercase tracking-widest text-white/50">{label}</span>
+      </div>
+      <div className="text-xl font-bold text-white mt-1 truncate">{value}</div>
+      {sub && <div className="text-sm text-white/50 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// ─── PDF builder ──────────────────────────────────────────────────────────────
+
+function buildPDF(data, filterLabel) {
+  const { kpis, positions } = data;
+  const top5  = positions.slice(0, 5);
+  const flop5 = [...positions].sort((a, b) => (a.plNet ?? a.realized) - (b.plNet ?? b.realized)).slice(0, 5);
+  const posRow = (p) => {
+    const pl = p.plNet ?? p.realized;
+    return `<tr><td>${p.sym}</td><td>${p.name.slice(0, 35)}</td>
+      <td class="num">${fmtEur(p.buys)}</td><td class="num">${fmtEur(p.sells)}</td>
+      <td class="num ${pl >= 0 ? "pos" : "neg"}">${fmtEur(pl)}</td></tr>`;
+  };
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
+<title>Rapport Saxo ${new Date().toLocaleDateString("fr-FR")}</title>
+<style>
+  @page{margin:18mm}*{box-sizing:border-box}
+  body{font-family:'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;margin:0;padding:20px}
+  .page{background:white;border-radius:12px;padding:36px;max-width:960px;margin:0 auto;box-shadow:0 4px 20px rgba(0,0,0,.08)}
+  h1{color:#4f46e5;font-size:26px;margin:0 0 4px}.sub{color:#64748b;font-size:12px;margin-bottom:28px}
+  h2{font-size:15px;color:#4f46e5;border-bottom:2px solid #e0e7ff;padding-bottom:5px;margin:28px 0 14px}
+  .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+  .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+  .card{background:#f1f5f9;border-radius:8px;padding:14px}
+  .card-l{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+  .card-v{font-size:18px;font-weight:700}.pos{color:#16a34a}.neg{color:#dc2626}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{background:#4f46e5;color:white;padding:9px 10px;text-align:left;font-weight:600}
+  td{padding:7px 10px;border-bottom:1px solid #f1f5f9}tr:nth-child(even) td{background:#f8fafc}
+  .num{text-align:right}.footer{text-align:center;color:#94a3b8;font-size:10px;margin-top:36px}
+</style></head><body><div class="page">
+  <h1>📊 Rapport Portefeuille Saxo</h1>
+  <div class="sub">Généré le ${new Date().toLocaleDateString("fr-FR")} · ${filterLabel} · ${positions.length} positions</div>
+  <h2>Performance Globale</h2>
+  <div class="g4">
+    <div class="card"><div class="card-l">Valeur Totale</div><div class="card-v">${fmtEur(kpis.valeurTotale)}</div></div>
+    <div class="card"><div class="card-l">Capital Net</div><div class="card-v">${fmtEur(kpis.netDeposits)}</div></div>
+    <div class="card"><div class="card-l">Résultat Net</div><div class="card-v ${kpis.netResult >= 0 ? "pos" : "neg"}">${fmtEur(kpis.netResult)}</div></div>
+    <div class="card"><div class="card-l">TWR Saxo</div><div class="card-v ${kpis.twr >= 0 ? "pos" : "neg"}">${fmtPct(kpis.twr)}</div></div>
+  </div>
+  <div class="g4">
+    <div class="card"><div class="card-l">Dépôts</div><div class="card-v">${fmtEur(kpis.deposits)}</div></div>
+    <div class="card"><div class="card-l">Dividendes</div><div class="card-v">${fmtEur(kpis.dividends)}</div></div>
+    <div class="card"><div class="card-l">Intérêts</div><div class="card-v">${fmtEur(kpis.interest)}</div></div>
+    <div class="card"><div class="card-l">Frais Totaux</div><div class="card-v neg">-${fmtEur(kpis.totalFees)}</div></div>
+  </div>
+  <h2>Frais Détaillés</h2>
+  <div class="g3">
+    <div class="card"><div class="card-l">Commissions</div><div class="card-v neg">-${fmtEur(kpis.fees.commission)}</div></div>
+    <div class="card"><div class="card-l">Taxes FFT</div><div class="card-v neg">-${fmtEur(kpis.fees.tax)}</div></div>
+    <div class="card"><div class="card-l">Exchange + Autres</div><div class="card-v neg">-${fmtEur(kpis.fees.exchange + kpis.fees.other)}</div></div>
+  </div>
+  <h2>Top 5 Positions</h2>
+  <table><thead><tr><th>Symbole</th><th>Nom</th><th class="num">Achats</th><th class="num">Ventes</th><th class="num">P&L Net</th></tr></thead>
+  <tbody>${top5.map(posRow).join("")}</tbody></table>
+  <h2>Flop 5 Positions</h2>
+  <table><thead><tr><th>Symbole</th><th>Nom</th><th class="num">Achats</th><th class="num">Ventes</th><th class="num">P&L Net</th></tr></thead>
+  <tbody>${flop5.map(posRow).join("")}</tbody></table>
+  <h2>Toutes les Positions (${positions.length})</h2>
+  <table><thead><tr><th>Symbole</th><th>Nom</th><th class="num">Achats</th><th class="num">Ventes</th><th class="num">P&L Net</th></tr></thead>
+  <tbody>${positions.map(posRow).join("")}</tbody></table>
+  <div class="footer">Saxo Analyzer · ${new Date().toLocaleString("fr-FR")}</div>
+</div></body></html>`;
+}
+
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+
+const TABS = [
+  { id: "overview",    label: "📋 Vue d'ensemble" },
+  { id: "performance", label: "📈 Performance" },
+  { id: "positions",   label: "💼 Positions" },
+  { id: "trends",      label: "📅 Trends" },
+  { id: "fees",        label: "💰 Frais" },
+];
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+export default function SaxoAnalyzer() {
+  const [workbook, setWorkbook] = useState(null);
+  const [data, setData]         = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [tab, setTab]           = useState("overview");
+  const [error, setError]       = useState(null);
+  const [filterCompte, setFilterCompte] = useState("ALL");
+  const [fileName, setFileName] = useState("");
+
+  const handleFile = useCallback((file) => {
+    if (!file) return;
+    setLoading(true); setError(null); setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        setWorkbook(wb);
+        setData(processXLSX(wb, "ALL"));
+        setFilterCompte("ALL");
+      } catch (err) {
+        setError("Erreur lecture : " + err.message);
+      }
+      setLoading(false);
+    };
+    reader.readAsArrayBuffer(file);
+  }, []);
+
+  const handleFilterChange = (compte) => {
+    setFilterCompte(compte);
+    if (workbook) setData(processXLSX(workbook, compte));
+  };
+
+  const exportPDF = () => {
+    if (!data) return;
+    const label = filterCompte === "ALL" ? "Tous les comptes" : (COMPTES_LABELS[filterCompte] || filterCompte);
+    const w = window.open("", "_blank");
+    w.document.write(buildPDF(data, label));
+    w.document.close();
+    setTimeout(() => w.print(), 600);
+  };
+
+  const exportCSV = () => {
+    if (!data) return;
+    const { kpis, positions } = data;
+    const rows = [
+      ["KPI", "Valeur"],
+      ["Valeur Totale Saxo", kpis.valeurTotale],
+      ["Capital Net Investi", kpis.netDeposits],
+      ["Résultat Net", kpis.netResult.toFixed(2)],
+      ["TWR Saxo", kpis.twr.toFixed(4) + "%"],
+      ["Dépôts", kpis.deposits], ["Retraits", kpis.withdrawals],
+      ["Dividendes", kpis.dividends], ["Intérêts", kpis.interest],
+      ["Commissions", kpis.fees.commission], ["Taxes FFT", kpis.fees.tax],
+      ["Exchange Fees", kpis.fees.exchange], ["Autres frais", kpis.fees.other],
+      ["Cash", kpis.cash], [],
+      ["Symbole", "Nom", "Achats", "Ventes", "P&L Net"],
+      ...positions.map((p) => [p.sym, p.name, p.buys.toFixed(2), p.sells.toFixed(2), (p.plNet ?? p.realized).toFixed(2)]),
+    ];
+    const blob = new Blob(["\uFEFF" + rows.map(r => r.join(";")).join("\n")], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `saxo_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #0a0a1a 0%, #1a1040 50%, #0a1a2a 100%)" }} className="p-5">
+      <div className="max-w-7xl mx-auto">
+
+        {/* Header */}
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-7">
+          <div>
+            <h1 className="text-3xl font-bold text-white tracking-tight">📊 Saxo Analyzer</h1>
+            {fileName && <p className="text-indigo-400 text-xs mt-1">{fileName}</p>}
+          </div>
+          {data && (
+            <div className="flex gap-2 flex-wrap items-center">
+              <select value={filterCompte} onChange={(e) => handleFilterChange(e.target.value)}
+                className="px-3 py-2 rounded-xl text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-indigo-400">
+                <option value="ALL">Tous les comptes</option>
+                {data.comptes.map((c) => <option key={c} value={c}>{COMPTES_LABELS[c] || c}</option>)}
+              </select>
+              <button onClick={exportCSV} className="px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/20 hover:bg-white/10 transition-all">⬇️ CSV</button>
+              <button onClick={exportPDF} className="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg">📄 PDF</button>
+              <button onClick={() => { setData(null); setWorkbook(null); setFileName(""); }} className="px-3 py-2 rounded-xl text-xs text-white/40 hover:text-white/70 hover:bg-white/5 transition-all">🔄</button>
+            </div>
+          )}
+        </div>
+
+        {/* Upload */}
+        {!data && !loading && (
+          <label className="block cursor-pointer">
+            <div className="border-2 border-dashed border-indigo-500/40 rounded-3xl p-16 text-center hover:border-indigo-400 transition-all hover:bg-white/5"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}>
+              <div className="text-6xl mb-4">📂</div>
+              <p className="text-white text-xl font-semibold mb-2">Glissez votre fichier XLSX Saxo ici</p>
+              <p className="text-indigo-300 text-sm mb-1">ou cliquez pour sélectionner</p>
+              <p className="text-indigo-500 text-xs font-mono mt-2">AggregatedAmounts_XXXXXXXX_YYYY-MM-DD_YYYY-MM-DD.xlsx</p>
+              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
+            </div>
+          </label>
+        )}
+
+        {loading && <div className="text-center py-24 text-indigo-300 text-xl animate-pulse">⏳ Analyse en cours…</div>}
+        {error   && <div className="bg-red-900/30 border border-red-500/50 rounded-2xl p-6 text-red-300 text-center">❌ {error}</div>}
+
+        {data && !loading && (
+          <>
+            {/* Tabs */}
+            <div className="flex gap-2 flex-wrap mb-5 bg-white/5 rounded-2xl p-1.5 border border-white/10">
+              {TABS.map((t) => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className={`px-4 py-2 rounded-xl font-semibold text-sm transition-all whitespace-nowrap ${tab === t.id ? "bg-indigo-600 text-white shadow-lg" : "text-indigo-200 hover:bg-white/10"}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Overview */}
+            {tab === "overview" && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <KpiCard label="Valeur Totale" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" />
+                  <KpiCard label="Capital Net Investi" value={fmtEur(data.kpis.netDeposits)} icon="💶" color="indigo" />
+                  <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} sub={fmtPct(data.kpis.perfPct)} icon="📈" color={data.kpis.netResult >= 0 ? "green" : "red"} />
+                  <KpiCard label="TWR Saxo" value={fmtPct(data.kpis.twr)} icon="🎯" color={data.kpis.twr >= 0 ? "teal" : "red"} />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <KpiCard label="Dépôts" value={fmtEur(data.kpis.deposits)} icon="⬆️" color="indigo" />
+                  <KpiCard label="Retraits" value={fmtEur(data.kpis.withdrawals)} icon="⬇️" color="pink" />
+                  <KpiCard label="Dividendes" value={fmtEur(data.kpis.dividends)} icon="🌱" color="green" />
+                  <KpiCard label="Intérêts" value={fmtEur(data.kpis.interest)} icon="⚡" color="teal" />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <KpiCard label="Frais Totaux" value={"-" + fmtEur(data.kpis.totalFees)} icon="🏦" color="amber" />
+                  <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} icon="📋" color="amber" />
+                  <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" />
+                  <KpiCard label="Ratio frais/capital" value={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(2) + " %" : "N/A"} icon="⚖️" color="amber" />
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4">Répartition des Frais</h3>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie data={[
+                        { name: "Commissions", value: Math.round(data.kpis.fees.commission) },
+                        { name: "Taxes FFT", value: Math.round(data.kpis.fees.tax) },
+                        { name: "Exchange", value: Math.round(data.kpis.fees.exchange) },
+                        { name: "Autres", value: Math.round(data.kpis.fees.other) },
+                      ].filter(d => d.value > 0)} cx="50%" cy="50%" outerRadius={85} dataKey="value"
+                        label={({ name, percent }) => percent > 0.03 ? `${name} ${(percent * 100).toFixed(0)}%` : ""}>
+                        {[0,1,2,3].map((i) => <Cell key={i} fill={COLORS[i]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Performance */}
+            {tab === "performance" && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <KpiCard label="TWR (Saxo officiel)" value={fmtPct(data.kpis.twr)} icon="🎯" color="teal" sub="Time-Weighted Return" />
+                  <KpiCard label="Valeur Portefeuille" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" />
+                  <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} icon="📊" color={data.kpis.netResult >= 0 ? "green" : "red"} />
+                </div>
+                {data.perfSeries.length > 0 && (
+                  <>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                      <h3 className="text-white font-semibold mb-4">TWR Cumulé (source Saxo officielle)</h3>
+                      <ResponsiveContainer width="100%" height={260}>
+                        <AreaChart data={data.perfSeries}>
+                          <defs>
+                            <linearGradient id="twrGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
+                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                          <XAxis dataKey="date" tick={{ fill: "#a5b4fc", fontSize: 10 }} tickCount={8} />
+                          <YAxis tick={{ fill: "#a5b4fc", fontSize: 10 }} tickFormatter={(v) => v.toFixed(1) + "%"} />
+                          <Tooltip formatter={(v) => v.toFixed(3) + "%"} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                          <Area type="monotone" dataKey="twr" name="TWR %" stroke="#6366f1" strokeWidth={2} fill="url(#twrGrad)" dot={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                      <h3 className="text-white font-semibold mb-4">Valeur du Portefeuille (€)</h3>
+                      <ResponsiveContainer width="100%" height={230}>
+                        <AreaChart data={data.perfSeries}>
+                          <defs>
+                            <linearGradient id="valGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.4} />
+                              <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                          <XAxis dataKey="date" tick={{ fill: "#a5b4fc", fontSize: 10 }} tickCount={8} />
+                          <YAxis tick={{ fill: "#a5b4fc", fontSize: 10 }} tickFormatter={(v) => (v / 1000).toFixed(0) + "k"} />
+                          <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                          <Area type="monotone" dataKey="valeur" name="Valeur €" stroke="#14b8a6" strokeWidth={2} fill="url(#valGrad)" dot={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                    <h3 className="text-white font-semibold mb-4">🏆 Top 10 P&L</h3>
+                    <div className="space-y-2">
+                      {data.positions.slice(0, 10).map((p, i) => {
+                        const pl = p.plNet ?? p.realized;
+                        return (
+                          <div key={i} className="flex justify-between items-center py-1.5 border-b border-white/5">
+                            <span className="text-indigo-200 font-mono text-sm">{p.sym}</span>
+                            <span className={`font-semibold text-sm ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(pl)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                    <h3 className="text-white font-semibold mb-4">📉 Flop 10 P&L</h3>
+                    <div className="space-y-2">
+                      {[...data.positions].sort((a, b) => (a.plNet ?? a.realized) - (b.plNet ?? b.realized)).slice(0, 10).map((p, i) => {
+                        const pl = p.plNet ?? p.realized;
+                        return (
+                          <div key={i} className="flex justify-between items-center py-1.5 border-b border-white/5">
+                            <span className="text-indigo-200 font-mono text-sm">{p.sym}</span>
+                            <span className={`font-semibold text-sm ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(pl)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Positions */}
+            {tab === "positions" && (
+              <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                <div className="p-4 border-b border-white/10 text-indigo-300 text-sm">{data.positions.length} positions · triées par P&L Net</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-white/5">
+                        <th className="text-left text-indigo-300 py-3 px-4 font-semibold">Symbole</th>
+                        <th className="text-left text-indigo-300 py-3 px-4 font-semibold">Nom</th>
+                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Achats</th>
+                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Ventes</th>
+                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">P&L Net</th>
+                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Trades</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.positions.map((p, i) => {
+                        const pl = p.plNet ?? p.realized;
+                        return (
+                          <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                            <td className="py-2.5 px-4 text-white font-mono font-semibold">{p.sym}</td>
+                            <td className="py-2.5 px-4 text-indigo-200 max-w-xs truncate">{p.name}</td>
+                            <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.buys)}</td>
+                            <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.sells)}</td>
+                            <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur2(pl)}</td>
+                            <td className="py-2.5 px-4 text-right text-indigo-300">{p.trades}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Trends */}
+            {tab === "trends" && (
+              <div className="space-y-5">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4">Dépôts Mensuels</h3>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={data.months}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                      <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
+                      <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Bar dataKey="deposits" name="Dépôts" fill="#6366f1" radius={[4,4,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4">Achats vs Ventes Mensuels</h3>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={data.months}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                      <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
+                      <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Legend wrapperStyle={{ color: "#a5b4fc" }} />
+                      <Bar dataKey="buys" name="Achats" fill="#ec4899" radius={[4,4,0,0]} />
+                      <Bar dataKey="sells" name="Ventes" fill="#14b8a6" radius={[4,4,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4">Frais & Dividendes Mensuels</h3>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={data.months}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                      <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
+                      <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => v.toFixed(0)+"€"} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Legend wrapperStyle={{ color: "#a5b4fc" }} />
+                      <Line type="monotone" dataKey="fees" name="Frais" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="dividends" name="Dividendes" stroke="#10b981" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="interest" name="Intérêts" stroke="#06b6d4" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Fees */}
+            {tab === "fees" && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <KpiCard label="Total Frais" value={"-"+fmtEur(data.kpis.totalFees)} icon="💸" color="red" />
+                  <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} icon="🏦" color="amber" />
+                  <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" />
+                  <KpiCard label="Exchange + Autres" value={"-"+fmtEur(data.kpis.fees.exchange + data.kpis.fees.other)} icon="🔄" color="amber" />
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4">Frais Mensuels</h3>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={data.months}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                      <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
+                      <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => v.toFixed(0)+"€"} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Bar dataKey="fees" name="Frais" fill="#f59e0b" radius={[4,4,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 text-center space-x-6">
+                  <span className="text-indigo-300 text-sm">Ratio frais / capital : </span>
+                  <span className="text-white font-bold">
+                    {data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(3) + " %" : "N/A"}
+                  </span>
+                  <span className="text-indigo-300 text-sm ml-6">Frais / résultat brut : </span>
+                  <span className="text-white font-bold">
+                    {(data.kpis.netResult + data.kpis.totalFees) > 0
+                      ? ((data.kpis.totalFees / (data.kpis.netResult + data.kpis.totalFees)) * 100).toFixed(1) + " %"
+                      : "N/A"}
+                  </span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
