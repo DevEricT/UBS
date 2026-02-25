@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -262,10 +262,25 @@ function KpiCard({ label, value, sub, color = "indigo", icon, tooltip }) {
 
 function InfoTooltip({ text }) {
   const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const ref = React.useRef(null);
+
+  const handleEnter = () => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setPos({
+        top: rect.top + window.scrollY - 8,
+        left: rect.left + rect.width / 2,
+      });
+    }
+    setShow(true);
+  };
+
   return (
     <span style={{ position: "relative", display: "inline-flex", alignItems: "center", marginLeft: 5 }}>
       <span
-        onMouseEnter={() => setShow(true)}
+        ref={ref}
+        onMouseEnter={handleEnter}
         onMouseLeave={() => setShow(false)}
         style={{
           display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -276,12 +291,15 @@ function InfoTooltip({ text }) {
       >?</span>
       {show && (
         <span style={{
-          position: "absolute", bottom: "calc(100% + 6px)", left: "50%",
-          transform: "translateX(-50%)", background: "#1e1b4b",
+          position: "fixed",
+          top: pos.top - 4,
+          left: pos.left,
+          transform: "translate(-50%, -100%)",
+          background: "#1e1b4b",
           border: "1px solid #4338ca", borderRadius: 6, padding: "7px 10px",
           color: "#e0e7ff", fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap",
-          width: 220, zIndex: 9999, pointerEvents: "none",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.5)"
+          width: 230, zIndex: 99999, pointerEvents: "none",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.7)"
         }}>{text}</span>
       )}
     </span>
