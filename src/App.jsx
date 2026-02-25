@@ -73,6 +73,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
   const months = {};
   const quarters = {};
   const years = {};
+  const assetTypes = {}; // sym -> type d'actif
   let deposits = 0, withdrawals = 0, dividends = 0, interest = 0, cash = 0;
   let fees = { commission: 0, tax: 0, exchange: 0, other: 0 };
 
@@ -128,7 +129,9 @@ function processXLSX(workbook, filterCompte = "ALL") {
       return;
     }
     if ((type === "Share Amount" || type === "Mutual Funds Traded Value") && sym) {
-      if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0 };
+      const assetType = String(row["Type d'actif"] || "Stock").trim();
+      if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0, assetType };
+      if (!assetTypes[sym]) assetTypes[sym] = assetType;
       const p = positions[sym];
       p.trades++;
       if (amt < 0) { p.buys += Math.abs(amt); months[mk].buys += Math.abs(amt); quarters[qk].buys += Math.abs(amt); years[yk].buys += Math.abs(amt); }
@@ -160,17 +163,30 @@ function processXLSX(workbook, filterCompte = "ALL") {
     return r["ID du compte de comptabilisation"] === filterCompte;
   });
   const plMap = {};
+  const ventilation = { Stock: { pl: 0, buys: 0, sells: 0, fees: 0, label: "Actions" }, Etf: { pl: 0, buys: 0, sells: 0, fees: 0, label: "ETFs" }, MutualFund: { pl: 0, buys: 0, sells: 0, fees: 0, label: "OPCVM" } };
   bpRows.forEach(r => {
     const s = String(r["Symbole"] || "").trim();
     if (!s) return;
-    if (!plMap[s]) plMap[s] = { sym: s, name: String(r["Nom instrument"] || s), pl: 0 };
+    const at = String(r["Type d'actif"] || assetTypes[s] || "Stock").trim();
+    if (!plMap[s]) plMap[s] = { sym: s, name: String(r["Nom instrument"] || s), pl: 0, assetType: at };
     plMap[s].pl += parseNum(r["Montant dans la devise du compte"]);
+    if (!assetTypes[s]) assetTypes[s] = at;
+    // Ventilation par catégorie
+    if (!ventilation[at]) ventilation[at] = { pl: 0, buys: 0, sells: 0, fees: 0, label: at };
+    ventilation[at].pl += parseNum(r["Montant dans la devise du compte"]);
     // P&L par période
     const d = String(r["Date"] || "").trim();
     const qk2 = quarterKey(d);
     const yk2 = yearKey(d);
     if (quarters[qk2]) quarters[qk2].pl += parseNum(r["Montant dans la devise du compte"]);
     if (years[yk2]) years[yk2].pl += parseNum(r["Montant dans la devise du compte"]);
+  });
+  // Ventilation buys/sells depuis positions
+  Object.values(positions).forEach(p => {
+    const at = p.assetType || assetTypes[p.sym] || "Stock";
+    if (!ventilation[at]) ventilation[at] = { pl: 0, buys: 0, sells: 0, fees: 0, label: at };
+    ventilation[at].buys += p.buys;
+    ventilation[at].sells += p.sells;
   });
   Object.values(plMap).forEach(({ sym, name, pl }) => {
     if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0 };
@@ -201,6 +217,8 @@ function processXLSX(workbook, filterCompte = "ALL") {
     return Number(a.period) - Number(b.period);
   });
 
+  const ventilationArr = Object.values(ventilation).filter(v => v.pl !== 0 || v.buys > 0);
+
   return {
     kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
@@ -208,6 +226,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
     quarters: sortPeriod(Object.values(quarters), true),
     years: sortPeriod(Object.values(years), false),
     perfSeries: perfSeries.filter((_, i) => i % 3 === 0),
+    ventilation: ventilationArr,
     comptes,
   };
 }
@@ -481,6 +500,62 @@ export default function SaxoAnalyzer() {
                   <KpiCard label="Valeur Portefeuille" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} icon="📊" color={data.kpis.netResult >= 0 ? "green" : "red"} />
                 </div>
+                {/* Ventilation B/P par catégorie */}
+                {data.ventilation && data.ventilation.length > 0 && (
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                    <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest">Ventilation B/P par Catégorie</h3>
+                    <div className="overflow-x-auto mb-5">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-white/5">
+                            {["Catégorie","Achats","Ventes","P&L Net","% du total"].map(h => (
+                              <th key={h} className={`py-3 px-4 font-semibold text-indigo-300 text-xs uppercase tracking-wide ${h === "Catégorie" ? "text-left" : "text-right"}`}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.ventilation.map((v, i) => {
+                            const totalPL = data.ventilation.reduce((s, x) => s + x.pl, 0);
+                            const pct = totalPL !== 0 ? (v.pl / Math.abs(totalPL)) * 100 : 0;
+                            return (
+                              <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                <td className="py-3 px-4 text-white font-semibold flex items-center gap-2">
+                                  <span className="inline-block w-2 h-2 rounded-full" style={{background: COLORS[i]}}></span>
+                                  {v.label}
+                                </td>
+                                <td className="py-3 px-4 text-right text-white">{fmtEur(v.buys)}</td>
+                                <td className="py-3 px-4 text-right text-white">{fmtEur(v.sells)}</td>
+                                <td className={`py-3 px-4 text-right font-bold ${v.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(v.pl)}</td>
+                                <td className={`py-3 px-4 text-right font-semibold ${v.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{pct.toFixed(1)} %</td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="bg-white/5 font-bold">
+                            <td className="py-3 px-4 text-white">Total</td>
+                            <td className="py-3 px-4 text-right text-white">{fmtEur(data.ventilation.reduce((s,v)=>s+v.buys,0))}</td>
+                            <td className="py-3 px-4 text-right text-white">{fmtEur(data.ventilation.reduce((s,v)=>s+v.sells,0))}</td>
+                            <td className={`py-3 px-4 text-right font-bold text-base ${data.ventilation.reduce((s,v)=>s+v.pl,0) >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(data.ventilation.reduce((s,v)=>s+v.pl,0))}</td>
+                            <td className="py-3 px-4 text-right text-indigo-300">100 %</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={data.ventilation} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                        <XAxis type="number" tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
+                        <YAxis type="category" dataKey="label" tick={{ fill: "#a5b4fc", fontSize: 12 }} width={70} />
+                        <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} itemStyle={{ color: "#fff" }} labelStyle={{ color: "#fff" }} />
+                        <Bar dataKey="pl" name="P&L Net" radius={[0,4,4,0]}>
+                          {data.ventilation.map((entry, index) => (
+                            <Cell key={index} fill={entry.pl >= 0 ? "#10b981" : "#ef4444"} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
                 {data.perfSeries.length > 0 && (
                   <>
                     <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
