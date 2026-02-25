@@ -135,9 +135,12 @@ function processXLSX(workbook, filterCompte = "ALL") {
       if (!assetTypes[sym]) assetTypes[sym] = assetType;
       const p = positions[sym];
       p.trades++;
-      const devise = String(row["Devise du compte"] || "EUR").trim();
-      if (amt < 0) { p.buys += Math.abs(amt); months[mk].buys += Math.abs(amt); quarters[qk].buys += Math.abs(amt); years[yk].buys += Math.abs(amt); if (devise !== "EUR") volumeNonEur += Math.abs(amt); }
-      else { p.sells += amt; months[mk].sells += amt; quarters[qk].sells += amt; years[yk].sells += amt; if (devise !== "EUR") volumeNonEur += amt; }
+      // Exchanges non-EUR : xnas, xnys (USD), xlon (GBP), etc.
+      const EUR_EXCHANGES = ["xpar","xams","xbru","xlis","xmil","xetr","xhel","xsto","xcse","xosl","xwbo"];
+      const symSuffix = sym.includes(":") ? sym.split(":")[1].toLowerCase() : "";
+      const isNonEur = symSuffix && !EUR_EXCHANGES.includes(symSuffix);
+      if (amt < 0) { p.buys += Math.abs(amt); months[mk].buys += Math.abs(amt); quarters[qk].buys += Math.abs(amt); years[yk].buys += Math.abs(amt); if (isNonEur) volumeNonEur += Math.abs(amt); }
+      else { p.sells += amt; months[mk].sells += amt; quarters[qk].sells += amt; years[yk].sells += amt; if (isNonEur) volumeNonEur += amt; }
       p.realized = p.sells - p.buys;
       if (affecte === "oui") cash += amt;
       return;
