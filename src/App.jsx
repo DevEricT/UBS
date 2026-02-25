@@ -949,7 +949,7 @@ export default function SaxoAnalyzer() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Frais Totaux" value={"-" + fmtEur(data.kpis.totalFees)} icon="🏦" color="amber" tooltip="Somme de toutes les charges : commissions, taxe FFT, frais de change, taxes sociales." />
-                  <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} icon="📋" color="amber" tooltip="Frais de courtage facturés par Saxo sur chaque ordre exécuté." />
+                  <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} icon="📋" color="amber" tooltip="Frais de courtage prélevés par Saxo sur chaque ordre exécuté (type de montant : Commission dans le fichier)." />
                   <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="Taxe sur les Transactions Financières française (0,3%) applicable aux achats d’actions françaises de plus de 1 milliard de capitalisation." />
                   <KpiCard label="Ratio frais/capital" value={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(2) + " %" : "N/A"} icon="⚖️" color="amber" tooltip="Frais totaux divisés par le capital net investi. Indicateur du coût de gestion du portefeuille." />
                 </div>
@@ -1290,9 +1290,9 @@ export default function SaxoAnalyzer() {
               <div className="space-y-5">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Total Frais" value={"-"+fmtEur(data.kpis.totalFees)} icon="💸" color="red" tooltip="Somme de toutes les charges prélevées : courtage, FFT, frais de change, taxes sociales et retenues à la source." />
-                  <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} icon="🏦" color="amber" tooltip="Frais de courtage Saxo sur les ordres exécutés. Typiquement 0,10% min 4€ sur actions européennes." />
+                  <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} icon="🏦" color="amber" tooltip="Frais de courtage prélevés par Saxo sur chaque ordre exécuté (type de montant : Commission dans le fichier)." />
                   <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="French Financial Transaction Tax (0,3%) sur les achats d’actions françaises de plus de 1 Md€ de capitalisation." />
-                  <KpiCard label="Exchange + Autres" value={"-"+fmtEur(data.kpis.fees.exchange + data.kpis.fees.other)} icon="🔄" color="amber" tooltip="Frais de bourse (Exchange Fee), coûts externes (External product costs), taxes sociales et retenues à la source sur dividendes étrangers." />
+                  <KpiCard label="Exchange + Autres" value={"-"+fmtEur(data.kpis.fees.exchange + data.kpis.fees.other)} icon="🔄" color="amber" tooltip="Exchange Fee, External product costs, Social Tax, Withholding Tax, Advanced Income Tax - tels qu'ils apparaissent dans le fichier Saxo." />
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
                   <h3 className="text-white font-semibold mb-4 flex items-center">Frais Mensuels<InfoTooltip text="Évolution mensuelle du total des frais prélevés. Un pic peut indiquer un mois d’activité intense ou un achat de fonds avec droits d’entrée." /></h3>
