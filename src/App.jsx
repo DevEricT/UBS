@@ -606,9 +606,11 @@ export default function SaxoAnalyzer() {
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
                       <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
                       <Legend wrapperStyle={{ color: "#a5b4fc" }} />
-                      <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]}
-                        fill="#6366f1"
-                        label={false} />
+                      <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]}>
+                        {data.years.map((entry, index) => (
+                          <Cell key={index} fill={entry.pl >= 0 ? "#10b981" : "#ef4444"} />
+                        ))}
+                      </Bar>
                       <Bar dataKey="fees" name="Frais" radius={[4,4,0,0]} fill="#f59e0b" />
                     </BarChart>
                   </ResponsiveContainer>
@@ -658,7 +660,11 @@ export default function SaxoAnalyzer() {
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
                       <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
                       <Legend wrapperStyle={{ color: "#a5b4fc" }} />
-                      <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]} fill="#6366f1" />
+                      <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]}>
+                        {data.quarters.map((entry, index) => (
+                          <Cell key={index} fill={entry.pl >= 0 ? "#10b981" : "#ef4444"} />
+                        ))}
+                      </Bar>
                       <Bar dataKey="deposits" name="Dépôts" radius={[4,4,0,0]} fill="#14b8a6" />
                       <Bar dataKey="fees" name="Frais" radius={[4,4,0,0]} fill="#f59e0b" />
                     </BarChart>
