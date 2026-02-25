@@ -28,6 +28,22 @@ const monthKey = (dateStr) => {
   return String(dateStr).slice(0, 7);
 };
 
+const quarterKey = (dateStr) => {
+  if (!dateStr) return "??";
+  const p = String(dateStr).split("-");
+  if (p.length === 3) {
+    const q = Math.ceil(Number(p[1]) / 3);
+    return `Q${q} ${p[2]}`;
+  }
+  return dateStr;
+};
+
+const yearKey = (dateStr) => {
+  if (!dateStr) return "??";
+  const p = String(dateStr).split("-");
+  return p.length === 3 ? p[2] : dateStr.slice(0, 4);
+};
+
 const COLORS = ["#6366f1", "#ec4899", "#14b8a6", "#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316"];
 
 const COMPTES_LABELS = {
@@ -55,6 +71,8 @@ function processXLSX(workbook, filterCompte = "ALL") {
 
   const positions = {};
   const months = {};
+  const quarters = {};
+  const years = {};
   let deposits = 0, withdrawals = 0, dividends = 0, interest = 0, cash = 0;
   let fees = { commission: 0, tax: 0, exchange: 0, other: 0 };
 
@@ -68,40 +86,44 @@ function processXLSX(workbook, filterCompte = "ALL") {
     const affecte = String(row["Affecte le solde"] || "").trim().toLowerCase();
 
     if (!months[mk]) months[mk] = { month: mk, deposits: 0, buys: 0, sells: 0, fees: 0, dividends: 0, interest: 0 };
+    const qk = quarterKey(date);
+    const yk = yearKey(date);
+    if (!quarters[qk]) quarters[qk] = { period: qk, deposits: 0, buys: 0, sells: 0, fees: 0, dividends: 0, interest: 0, pl: 0 };
+    if (!years[yk]) years[yk] = { period: yk, deposits: 0, buys: 0, sells: 0, fees: 0, dividends: 0, interest: 0, pl: 0 };
 
     if (type === "Cash Amount") {
-      if (amt > 0) { deposits += amt; months[mk].deposits += amt; }
+      if (amt > 0) { deposits += amt; months[mk].deposits += amt; quarters[qk].deposits += amt; years[yk].deposits += amt; }
       else { withdrawals += Math.abs(amt); }
       if (affecte === "oui") cash += amt;
       return;
     }
     if (type === "Client Interest") {
-      interest += amt; months[mk].interest += amt;
+      interest += amt; months[mk].interest += amt; quarters[qk].interest += amt; years[yk].interest += amt;
       if (affecte === "oui") cash += amt;
       return;
     }
     if (type === "Corporate Actions - Cash Dividends") {
-      dividends += amt; months[mk].dividends += amt;
+      dividends += amt; months[mk].dividends += amt; quarters[qk].dividends += amt; years[yk].dividends += amt;
       if (affecte === "oui") cash += amt;
       return;
     }
     if (type === "Commission" || type === "Client Commission Credit") {
-      fees.commission += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      fees.commission += Math.abs(amt); months[mk].fees += Math.abs(amt); quarters[qk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
       if (affecte === "oui") cash += amt;
       return;
     }
     if (type === "French Financial Transaction Tax") {
-      fees.tax += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      fees.tax += Math.abs(amt); months[mk].fees += Math.abs(amt); quarters[qk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
       if (affecte === "oui") cash += amt;
       return;
     }
     if (type === "Exchange Fee" || type === "External product costs") {
-      fees.exchange += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      fees.exchange += Math.abs(amt); months[mk].fees += Math.abs(amt); quarters[qk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
       if (affecte === "oui") cash += amt;
       return;
     }
     if (type.includes("Social Tax") || type.includes("Withholding Tax") || type.includes("Advanced Income Tax")) {
-      fees.other += Math.abs(amt); months[mk].fees += Math.abs(amt);
+      fees.other += Math.abs(amt); months[mk].fees += Math.abs(amt); quarters[qk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
       if (affecte === "oui") cash += amt;
       return;
     }
@@ -109,8 +131,8 @@ function processXLSX(workbook, filterCompte = "ALL") {
       if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0 };
       const p = positions[sym];
       p.trades++;
-      if (amt < 0) { p.buys += Math.abs(amt); months[mk].buys += Math.abs(amt); }
-      else { p.sells += amt; months[mk].sells += amt; }
+      if (amt < 0) { p.buys += Math.abs(amt); months[mk].buys += Math.abs(amt); quarters[qk].buys += Math.abs(amt); years[yk].buys += Math.abs(amt); }
+      else { p.sells += amt; months[mk].sells += amt; quarters[qk].sells += amt; years[yk].sells += amt; }
       p.realized = p.sells - p.buys;
       if (affecte === "oui") cash += amt;
       return;
@@ -143,6 +165,12 @@ function processXLSX(workbook, filterCompte = "ALL") {
     if (!s) return;
     if (!plMap[s]) plMap[s] = { sym: s, name: String(r["Nom instrument"] || s), pl: 0 };
     plMap[s].pl += parseNum(r["Montant dans la devise du compte"]);
+    // P&L par période
+    const d = String(r["Date"] || "").trim();
+    const qk2 = quarterKey(d);
+    const yk2 = yearKey(d);
+    if (quarters[qk2]) quarters[qk2].pl += parseNum(r["Montant dans la devise du compte"]);
+    if (years[yk2]) years[yk2].pl += parseNum(r["Montant dans la devise du compte"]);
   });
   Object.values(plMap).forEach(({ sym, name, pl }) => {
     if (!positions[sym]) positions[sym] = { sym, name, buys: 0, sells: 0, realized: 0, trades: 0 };
@@ -163,10 +191,22 @@ function processXLSX(workbook, filterCompte = "ALL") {
   const allRows = XLSX.utils.sheet_to_json(sheetMain, { defval: null });
   const comptes = [...new Set(allRows.map(r => r["ID du compte de comptabilisation"]).filter(Boolean))].sort();
 
+  // Trier quarters et years
+  const sortPeriod = (arr, isQuarter) => arr.sort((a, b) => {
+    if (isQuarter) {
+      const [qa, ya] = [a.period.split(" ")[0], a.period.split(" ")[1]];
+      const [qb, yb] = [b.period.split(" ")[0], b.period.split(" ")[1]];
+      return ya !== yb ? Number(ya) - Number(yb) : Number(qa[1]) - Number(qb[1]);
+    }
+    return Number(a.period) - Number(b.period);
+  });
+
   return {
     kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
     months: sortedMonths,
+    quarters: sortPeriod(Object.values(quarters), true),
+    years: sortPeriod(Object.values(years), false),
     perfSeries: perfSeries.filter((_, i) => i % 3 === 0),
     comptes,
   };
@@ -265,6 +305,7 @@ function buildPDF(data, filterLabel) {
 const TABS = [
   { id: "overview",    label: "📋 Vue d'ensemble" },
   { id: "performance", label: "📈 Performance" },
+  { id: "periodes",    label: "📆 Périodes" },
   { id: "positions",   label: "💼 Positions" },
   { id: "trends",      label: "📅 Trends" },
   { id: "fees",        label: "💰 Frais" },
@@ -509,6 +550,117 @@ export default function SaxoAnalyzer() {
                       })}
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Périodes */}
+            {tab === "periodes" && (
+              <div className="space-y-6">
+                {/* Sélecteur vue */}
+                <div className="flex gap-3 mb-2">
+                  <span className="text-indigo-300 text-sm self-center">Afficher par :</span>
+                </div>
+
+                {/* Par année */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest">Performance Annuelle</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-white/5">
+                          {["Année","Dépôts","Achats","Ventes","P&L Net","Frais","Dividendes","Résultat"].map(h => (
+                            <th key={h} className={`py-3 px-4 font-semibold text-indigo-300 text-xs uppercase tracking-wide ${h === "Année" ? "text-left" : "text-right"}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.years.map((y, i) => {
+                          const resultat = y.pl + y.dividends + y.interest - y.fees;
+                          return (
+                            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                              <td className="py-3 px-4 text-white font-bold text-base">{y.period}</td>
+                              <td className="py-3 px-4 text-right text-indigo-200">{fmtEur(y.deposits)}</td>
+                              <td className="py-3 px-4 text-right text-white">{fmtEur(y.buys)}</td>
+                              <td className="py-3 px-4 text-right text-white">{fmtEur(y.sells)}</td>
+                              <td className={`py-3 px-4 text-right font-semibold ${y.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(y.pl)}</td>
+                              <td className="py-3 px-4 text-right text-amber-400">{y.fees > 0 ? "-" + fmtEur(y.fees) : "—"}</td>
+                              <td className="py-3 px-4 text-right text-teal-400">{y.dividends > 0 ? fmtEur(y.dividends + y.interest) : "—"}</td>
+                              <td className={`py-3 px-4 text-right font-bold text-base ${resultat >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(resultat)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Graphique annuel P&L */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4 text-sm uppercase tracking-widest">P&L Net par Année</h3>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={data.years}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                      <XAxis dataKey="period" tick={{ fill: "#a5b4fc", fontSize: 12 }} />
+                      <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Legend wrapperStyle={{ color: "#a5b4fc" }} />
+                      <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]}
+                        fill="#6366f1"
+                        label={false} />
+                      <Bar dataKey="fees" name="Frais" radius={[4,4,0,0]} fill="#f59e0b" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Par trimestre */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest">Performance Trimestrielle</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-white/5">
+                          {["Trimestre","Dépôts","Achats","Ventes","P&L Net","Frais","Dividendes","Résultat"].map(h => (
+                            <th key={h} className={`py-3 px-4 font-semibold text-indigo-300 text-xs uppercase tracking-wide ${h === "Trimestre" ? "text-left" : "text-right"}`}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.quarters.map((q, i) => {
+                          const resultat = q.pl + q.dividends + q.interest - q.fees;
+                          return (
+                            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                              <td className="py-2.5 px-4 text-white font-bold">{q.period}</td>
+                              <td className="py-2.5 px-4 text-right text-indigo-200">{fmtEur(q.deposits)}</td>
+                              <td className="py-2.5 px-4 text-right text-white">{fmtEur(q.buys)}</td>
+                              <td className="py-2.5 px-4 text-right text-white">{fmtEur(q.sells)}</td>
+                              <td className={`py-2.5 px-4 text-right font-semibold ${q.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(q.pl)}</td>
+                              <td className="py-2.5 px-4 text-right text-amber-400">{q.fees > 0 ? "-" + fmtEur(q.fees) : "—"}</td>
+                              <td className="py-2.5 px-4 text-right text-teal-400">{q.dividends > 0 ? fmtEur(q.dividends + q.interest) : "—"}</td>
+                              <td className={`py-2.5 px-4 text-right font-bold ${resultat >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(resultat)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Graphique trimestriel */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+                  <h3 className="text-white font-semibold mb-4 text-sm uppercase tracking-widest">P&L Net par Trimestre</h3>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={data.quarters}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                      <XAxis dataKey="period" tick={{ fill: "#a5b4fc", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Legend wrapperStyle={{ color: "#a5b4fc" }} />
+                      <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]} fill="#6366f1" />
+                      <Bar dataKey="deposits" name="Dépôts" radius={[4,4,0,0]} fill="#14b8a6" />
+                      <Bar dataKey="fees" name="Frais" radius={[4,4,0,0]} fill="#f59e0b" />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             )}
