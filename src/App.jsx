@@ -613,9 +613,9 @@ function AnnualView({ data }) {
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <h3 className="text-white font-semibold mb-4 flex items-center text-sm uppercase tracking-widest">
               Performance Mensuelle (TWR Δ%)
-              <InfoTooltip text={"Variation mensuelle du TWR cumulé Saxo.
-Barre verte = mois positif, rouge = mois négatif.
-" + (statsB ? `Comparaison ${yearA} vs ${yearB}.` : "Activer 'Comparer' pour superposer une autre année.")} />
+              <InfoTooltip text="Variation mensuelle du TWR cumule Saxo. Barre verte = mois positif, rouge = negatif. Activer Comparer pour superposer une autre annee." />
+
+
             </h3>
             {compareMode && statsB ? (
               <ResponsiveContainer width="100%" height={280}>
