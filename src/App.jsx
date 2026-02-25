@@ -226,6 +226,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
     quarters: sortPeriod(Object.values(quarters), true),
     years: sortPeriod(Object.values(years), false),
     perfSeries: perfSeries.filter((_, i) => i % 3 === 0),
+    perfSeriesFull: perfSeries,
     ventilation: ventilationArr,
     comptes,
   };
@@ -356,11 +357,354 @@ function buildPDF(data, filterLabel) {
 const TABS = [
   { id: "overview",    label: "📋 Vue d'ensemble" },
   { id: "performance", label: "📈 Performance" },
+  { id: "annuel",      label: "📊 Vue Annuelle" },
   { id: "periodes",    label: "📆 Périodes" },
   { id: "positions",   label: "💼 Positions" },
   { id: "trends",      label: "📅 Trends" },
   { id: "fees",        label: "💰 Frais" },
 ];
+
+
+// ─── Helpers calculs annuels ──────────────────────────────────────────────────
+
+function buildYearStats(year, data) {
+  const yData = data.years.find(y => y.period === String(year));
+  if (!yData) return null;
+
+  // TWR annuel depuis perfSeriesFull
+  const yearSeries = (data.perfSeriesFull || []).filter(r => {
+    const p = String(r.date).split("-");
+    return p.length === 3 && p[2] === String(year);
+  });
+
+  // Calcul TWR annuel : dernier twr - premier twr de l'année
+  let twrAnnuel = 0;
+  if (yearSeries.length >= 2) {
+    const first = yearSeries[0].twr;
+    const last  = yearSeries[yearSeries.length - 1].twr;
+    twrAnnuel = last - first;
+  } else if (yearSeries.length === 1) {
+    twrAnnuel = yearSeries[0].twr;
+  }
+
+  // Rendements journaliers pour volatilité
+  const dailyReturns = yearSeries
+    .map(r => r.dailyPct || 0)
+    .filter(v => v !== 0);
+
+  // Volatilité = écart-type * sqrt(252)
+  let volatility = 0;
+  if (dailyReturns.length > 1) {
+    const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+    const variance = dailyReturns.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (dailyReturns.length - 1);
+    volatility = Math.sqrt(variance) * Math.sqrt(252);
+  }
+
+  // Ratio Sharpe (taux sans risque ~3%)
+  const sharpe = volatility > 0 ? ((twrAnnuel - 3) / volatility) : 0;
+
+  // Drawdown max
+  let maxDrawdown = 0;
+  let peak = -Infinity;
+  yearSeries.forEach(r => {
+    if (r.valeur > peak) peak = r.valeur;
+    const dd = peak > 0 ? ((r.valeur - peak) / peak) * 100 : 0;
+    if (dd < maxDrawdown) maxDrawdown = dd;
+  });
+
+  // Meilleur / pire mois
+  const monthlyTWR = {};
+  yearSeries.forEach(r => {
+    const p = String(r.date).split("-");
+    if (p.length === 3) {
+      const mk = `${p[1]}/${p[2]}`;
+      monthlyTWR[mk] = r.twr;
+    }
+  });
+  const monthKeys = Object.keys(monthlyTWR).sort((a,b) => {
+    const [am, ay] = a.split("/"); const [bm, by] = b.split("/");
+    return ay !== by ? Number(ay) - Number(by) : Number(am) - Number(bm);
+  });
+  const monthlyPerf = [];
+  for (let i = 1; i < monthKeys.length; i++) {
+    const prev = monthlyTWR[monthKeys[i-1]];
+    const curr = monthlyTWR[monthKeys[i]];
+    monthlyPerf.push({ month: monthKeys[i], perf: curr - prev });
+  }
+  if (monthlyPerf.length === 0 && monthKeys.length === 1) {
+    monthlyPerf.push({ month: monthKeys[0], perf: monthlyTWR[monthKeys[0]] });
+  }
+  const bestMonth  = monthlyPerf.length ? monthlyPerf.reduce((a,b) => a.perf > b.perf ? a : b) : null;
+  const worstMonth = monthlyPerf.length ? monthlyPerf.reduce((a,b) => a.perf < b.perf ? a : b) : null;
+
+  // Série mensuelle pour graphique
+  const monthNames = { "01":"Jan","02":"Fév","03":"Mar","04":"Avr","05":"Mai","06":"Juin","07":"Juil","08":"Aoû","09":"Sep","10":"Oct","11":"Nov","12":"Déc" };
+  const monthlySerie = monthlyPerf.map(m => ({
+    label: monthNames[m.month.split("/")[0]] || m.month,
+    perf: parseFloat(m.perf.toFixed(3)),
+    month: m.month,
+  }));
+
+  return {
+    year,
+    ...yData,
+    twrAnnuel,
+    volatility,
+    sharpe,
+    maxDrawdown,
+    bestMonth,
+    worstMonth,
+    monthlySerie,
+    yearSeries,
+    resultat: yData.pl + yData.dividends + yData.interest - yData.fees,
+  };
+}
+
+// ─── Composant Vue Annuelle ───────────────────────────────────────────────────
+
+function AnnualView({ data }) {
+  const availableYears = data.years.map(y => y.period).sort();
+  const [yearA, setYearA] = useState(availableYears[availableYears.length - 1] || "");
+  const [yearB, setYearB] = useState(availableYears.length > 1 ? availableYears[availableYears.length - 2] : "");
+  const [compareMode, setCompareMode] = useState(false);
+
+  const statsA = yearA ? buildYearStats(yearA, data) : null;
+  const statsB = compareMode && yearB ? buildYearStats(yearB, data) : null;
+
+  const MONTHS = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Aoû","Sep","Oct","Nov","Déc"];
+
+  // Construire série comparative (index mois 1-12)
+  const buildCompSerie = (stats) => {
+    if (!stats) return [];
+    const map = {};
+    stats.monthlySerie.forEach(m => {
+      const mNum = parseInt(m.month.split("/")[0]);
+      map[mNum] = m.perf;
+    });
+    return Array.from({length: 12}, (_, i) => ({
+      month: MONTHS[i],
+      perf: map[i+1] ?? null,
+    }));
+  };
+
+  const serieA = buildCompSerie(statsA);
+  const serieB = buildCompSerie(statsB);
+
+  // Merger pour graphique comparatif
+  const mergedSerie = MONTHS.map((m, i) => ({
+    month: m,
+    [yearA]: serieA[i]?.perf ?? null,
+    ...(statsB ? { [yearB]: serieB[i]?.perf ?? null } : {}),
+  }));
+
+  const StatBlock = ({ label, valueA, valueB, format = "eur", tooltip }) => {
+    const fmt = (v) => {
+      if (v == null) return "—";
+      if (format === "pct") return fmtPct(v);
+      if (format === "pct2") return v.toFixed(2) + " %";
+      if (format === "ratio") return v.toFixed(2);
+      return fmtEur(v);
+    };
+    const colorClass = (v, fmt) => {
+      if (v == null) return "text-white";
+      if (fmt === "ratio") return v >= 1 ? "text-green-400" : v >= 0 ? "text-amber-400" : "text-red-400";
+      return v >= 0 ? "text-green-400" : "text-red-400";
+    };
+    return (
+      <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+        <div className="flex items-center gap-1 mb-2">
+          <span className="text-xs font-semibold uppercase tracking-widest text-white/50">{label}</span>
+          {tooltip && <InfoTooltip text={tooltip} />}
+        </div>
+        <div className={`text-lg font-bold ${colorClass(valueA, format)}`}>{fmt(valueA)}</div>
+        {statsB && (
+          <div className={`text-sm font-semibold mt-1 ${colorClass(valueB, format)}`}>
+            <span className="text-white/30 mr-1">{yearB}:</span>{fmt(valueB)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Sélecteurs */}
+      <div className="flex flex-wrap items-center gap-4 bg-white/5 border border-white/10 rounded-2xl p-4">
+        <div className="flex items-center gap-2">
+          <span className="text-indigo-300 text-sm font-semibold">Année</span>
+          <select value={yearA} onChange={e => setYearA(e.target.value)}
+            className="px-3 py-2 rounded-xl text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-indigo-400">
+            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <button
+          onClick={() => setCompareMode(!compareMode)}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${compareMode ? "bg-indigo-600 text-white" : "bg-white/10 text-indigo-300 border border-white/20"}`}>
+          ⚖️ Comparer
+        </button>
+        {compareMode && (
+          <div className="flex items-center gap-2">
+            <span className="text-indigo-300 text-sm font-semibold">vs</span>
+            <select value={yearB} onChange={e => setYearB(e.target.value)}
+              className="px-3 py-2 rounded-xl text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-indigo-400">
+              {availableYears.filter(y => y !== yearA).map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        )}
+        {statsA && (
+          <div className="ml-auto text-indigo-300 text-xs">
+            {statsA.monthlySerie.length} mois de données
+          </div>
+        )}
+      </div>
+
+      {statsA && (
+        <>
+          {/* KPIs principaux */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatBlock label="TWR" valueA={statsA.twrAnnuel} valueB={statsB?.twrAnnuel} format="pct"
+              tooltip="Time-Weighted Return annuel : variation du TWR cumulé Saxo entre le 1er et dernier jour de l'année. Mesure la performance pure indépendamment des flux." />
+            <StatBlock label="P&L Réalisé" valueA={statsA.pl} valueB={statsB?.pl}
+              tooltip="Bénéfices et pertes réalisés sur les cessions de la période (source onglet B/P Saxo)." />
+            <StatBlock label="Résultat Net" valueA={statsA.resultat} valueB={statsB?.resultat}
+              tooltip="P&L réalisé + dividendes + intérêts – frais totaux de l'année." />
+            <StatBlock label="Capital Investi" valueA={statsA.deposits} valueB={statsB?.deposits}
+              tooltip="Total des dépôts entrants sur l'année." />
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatBlock label="Volatilité Annualisée" valueA={statsA.volatility} valueB={statsB?.volatility} format="pct2"
+              tooltip={"Écart-type des rendements journaliers × √252.
+Mesure l'amplitude des fluctuations. < 10% = faible, 10-20% = modérée, > 20% = élevée."} />
+            <StatBlock label="Ratio Sharpe" valueA={statsA.sharpe} valueB={statsB?.sharpe} format="ratio"
+              tooltip={"(TWR – taux sans risque 3%) / Volatilité.
+> 1 = excellente rémunération du risque
+0-1 = acceptable
+< 0 = sous-performant vs sans risque"} />
+            <StatBlock label="Drawdown Max" valueA={statsA.maxDrawdown} valueB={statsB?.maxDrawdown} format="pct2"
+              tooltip={"Perte maximale depuis un pic de valorisation sur l'année.
+Indicateur clé du risque de perte en capital." } />
+            <StatBlock label="Frais" valueA={-statsA.fees} valueB={statsB ? -statsB.fees : null}
+              tooltip="Total des frais prélevés sur l'année (commissions + FFT + autres)." />
+          </div>
+
+          {/* Meilleur / pire mois */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center gap-4">
+              <span className="text-2xl">🏆</span>
+              <div>
+                <div className="text-xs text-white/50 uppercase tracking-widest mb-1 flex items-center gap-1">
+                  Meilleur mois {yearA} <InfoTooltip text="Mois avec la progression de TWR la plus forte de l'année." />
+                </div>
+                <span className="text-white font-bold">{statsA.bestMonth?.month || "—"}</span>
+                <span className="text-green-400 font-bold ml-3">{statsA.bestMonth ? fmtPct(statsA.bestMonth.perf) : "—"}</span>
+                {statsB?.bestMonth && <div className="text-sm mt-1 text-white/50">{yearB}: <span className="text-green-400">{statsB.bestMonth.month} {fmtPct(statsB.bestMonth.perf)}</span></div>}
+              </div>
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center gap-4">
+              <span className="text-2xl">📉</span>
+              <div>
+                <div className="text-xs text-white/50 uppercase tracking-widest mb-1 flex items-center gap-1">
+                  Pire mois {yearA} <InfoTooltip text="Mois avec la plus forte baisse de TWR de l'année. Signal d'alerte sur les périodes de stress." />
+                </div>
+                <span className="text-white font-bold">{statsA.worstMonth?.month || "—"}</span>
+                <span className="text-red-400 font-bold ml-3">{statsA.worstMonth ? fmtPct(statsA.worstMonth.perf) : "—"}</span>
+                {statsB?.worstMonth && <div className="text-sm mt-1 text-white/50">{yearB}: <span className="text-red-400">{statsB.worstMonth.month} {fmtPct(statsB.worstMonth.perf)}</span></div>}
+              </div>
+            </div>
+          </div>
+
+          {/* Graphique TWR mensuel comparatif */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            <h3 className="text-white font-semibold mb-4 flex items-center text-sm uppercase tracking-widest">
+              Performance Mensuelle (TWR Δ%)
+              <InfoTooltip text={"Variation mensuelle du TWR cumulé Saxo.
+Barre verte = mois positif, rouge = mois négatif.
+" + (statsB ? `Comparaison ${yearA} vs ${yearB}.` : "Activer 'Comparer' pour superposer une autre année.")} />
+            </h3>
+            {compareMode && statsB ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={mergedSerie} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                  <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
+                  <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => v != null ? v.toFixed(1)+"%" : ""} />
+                  <Tooltip formatter={(v) => v != null ? fmtPct(v) : "—"} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} itemStyle={{ color: "#fff" }} labelStyle={{ color: "#fff" }} />
+                  <Legend wrapperStyle={{ color: "#a5b4fc" }} />
+                  <Bar dataKey={yearA} name={String(yearA)} radius={[3,3,0,0]}>
+                    {mergedSerie.map((entry, i) => <Cell key={i} fill={(entry[yearA] ?? 0) >= 0 ? "#10b981" : "#ef4444"} />)}
+                  </Bar>
+                  <Bar dataKey={yearB} name={String(yearB)} radius={[3,3,0,0]} fill="#6366f1" opacity={0.7}>
+                    {mergedSerie.map((entry, i) => <Cell key={i} fill={(entry[yearB] ?? 0) >= 0 ? "#6366f1" : "#ec4899"} opacity={0.75} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={statsA.monthlySerie}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                  <XAxis dataKey="label" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
+                  <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => v.toFixed(1)+"%"} />
+                  <Tooltip formatter={(v) => fmtPct(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} itemStyle={{ color: "#fff" }} labelStyle={{ color: "#fff" }} />
+                  <Bar dataKey="perf" name="TWR mensuel" radius={[3,3,0,0]}>
+                    {statsA.monthlySerie.map((entry, i) => <Cell key={i} fill={entry.perf >= 0 ? "#10b981" : "#ef4444"} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Tableau mensuel détaillé */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+            <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">
+              Détail mensuel {yearA}{statsB ? ` vs ${yearB}` : ""}
+              <InfoTooltip text="Variation de TWR mois par mois. Un mois sans donnée (—) signifie absence de transactions ou de données de performance dans le fichier." />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-white/5">
+                    <th className="text-left text-indigo-300 py-3 px-4 font-semibold text-xs uppercase">Mois</th>
+                    <th className="text-right text-indigo-300 py-3 px-4 font-semibold text-xs uppercase">TWR {yearA}</th>
+                    {statsB && <th className="text-right text-indigo-300 py-3 px-4 font-semibold text-xs uppercase">TWR {yearB}</th>}
+                    {statsB && <th className="text-right text-indigo-300 py-3 px-4 font-semibold text-xs uppercase">Écart</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MONTHS.map((m, i) => {
+                    const a = serieA[i]?.perf;
+                    const b = serieB[i]?.perf;
+                    const diff = a != null && b != null ? a - b : null;
+                    return (
+                      <tr key={m} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="py-2.5 px-4 text-white font-semibold">{m}</td>
+                        <td className={`py-2.5 px-4 text-right font-semibold ${a == null ? "text-white/30" : a >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {a != null ? fmtPct(a) : "—"}
+                        </td>
+                        {statsB && <td className={`py-2.5 px-4 text-right font-semibold ${b == null ? "text-white/30" : b >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {b != null ? fmtPct(b) : "—"}
+                        </td>}
+                        {statsB && <td className={`py-2.5 px-4 text-right font-bold ${diff == null ? "text-white/30" : diff >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {diff != null ? fmtPct(diff) : "—"}
+                        </td>}
+                      </tr>
+                    );
+                  })}
+                  {/* Ligne total */}
+                  <tr className="bg-white/10 font-bold">
+                    <td className="py-3 px-4 text-white">Total</td>
+                    <td className={`py-3 px-4 text-right text-base ${statsA.twrAnnuel >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtPct(statsA.twrAnnuel)}</td>
+                    {statsB && <td className={`py-3 px-4 text-right text-base ${statsB.twrAnnuel >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtPct(statsB.twrAnnuel)}</td>}
+                    {statsB && <td className={`py-3 px-4 text-right text-base ${(statsA.twrAnnuel - statsB.twrAnnuel) >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtPct(statsA.twrAnnuel - statsB.twrAnnuel)}</td>}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -659,6 +1003,11 @@ export default function SaxoAnalyzer() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* Vue Annuelle */}
+            {tab === "annuel" && (
+              <AnnualView data={data} />
             )}
 
             {/* Périodes */}
