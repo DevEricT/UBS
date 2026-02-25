@@ -194,6 +194,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
   });
 
   const totalFees = fees.commission + fees.tax + fees.exchange + fees.other;
+  const totalBuys = Object.values(positions).reduce((s, p) => s + p.buys, 0);
   const netDeposits = deposits - withdrawals;
   const netResult = dividends + interest + Object.values(positions).reduce((s, p) => s + (p.plNet ?? p.realized), 0) - totalFees;
   const perfPct = netDeposits > 0 ? (netResult / netDeposits) * 100 : 0;
@@ -220,7 +221,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
   const ventilationArr = Object.values(ventilation).filter(v => v.pl !== 0 || v.buys > 0);
 
   return {
-    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale },
+    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
     months: sortedMonths,
     quarters: sortPeriod(Object.values(quarters), true),
@@ -949,9 +950,9 @@ export default function SaxoAnalyzer() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Frais Totaux" value={"-" + fmtEur(data.kpis.totalFees)} icon="🏦" color="amber" tooltip="Somme de toutes les charges : commissions, taxe FFT, frais de change, taxes sociales." />
-                  <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} icon="📋" color="amber" tooltip="Frais de courtage prélevés par Saxo sur chaque ordre exécuté (type de montant : Commission dans le fichier)." />
+                  <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} sub={data.kpis.totalBuys > 0 ? (data.kpis.fees.commission / data.kpis.totalBuys * 100).toFixed(3) + " % des achats" : ""} icon="📋" color="amber" tooltip="Frais de courtage prélevés par Saxo sur chaque ordre exécuté. Le % est calculé sur le total des achats exécutés." />
                   <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="Taxe sur les Transactions Financières française (0,3%) applicable aux achats d’actions françaises de plus de 1 milliard de capitalisation." />
-                  <KpiCard label="Ratio frais/capital" value={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(2) + " %" : "N/A"} icon="⚖️" color="amber" tooltip="Frais totaux divisés par le capital net investi. Indicateur du coût de gestion du portefeuille." />
+                  <KpiCard label="Frais / Achats" value={data.kpis.totalBuys > 0 ? ((data.kpis.totalFees / data.kpis.totalBuys) * 100).toFixed(3) + " %" : "N/A"} sub={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(3) + " % du capital" : ""} icon="⚖️" color="amber" tooltip="Frais totaux / total des achats = coût effectif de transaction. Sous en-tête : frais / capital net investi." />
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
                   <h3 className="text-white font-semibold mb-4 flex items-center">Répartition des Frais<InfoTooltip text="Ventilation des frais par nature : courtage (commissions), taxe FFT, frais d’échange de devises, et autres (taxes sociales, retenues)." /></h3>
@@ -1290,7 +1291,7 @@ export default function SaxoAnalyzer() {
               <div className="space-y-5">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Total Frais" value={"-"+fmtEur(data.kpis.totalFees)} icon="💸" color="red" tooltip="Somme de toutes les charges prélevées : courtage, FFT, frais de change, taxes sociales et retenues à la source." />
-                  <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} icon="🏦" color="amber" tooltip="Frais de courtage prélevés par Saxo sur chaque ordre exécuté (type de montant : Commission dans le fichier)." />
+                  <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} sub={data.kpis.totalBuys > 0 ? (data.kpis.fees.commission / data.kpis.totalBuys * 100).toFixed(3) + " % des achats" : ""} icon="🏦" color="amber" tooltip="Frais de courtage prélevés par Saxo sur chaque ordre exécuté. Le % est calculé sur le total des achats exécutés." />
                   <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="French Financial Transaction Tax (0,3%) sur les achats d’actions françaises de plus de 1 Md€ de capitalisation." />
                   <KpiCard label="Exchange + Autres" value={"-"+fmtEur(data.kpis.fees.exchange + data.kpis.fees.other)} icon="🔄" color="amber" tooltip="Exchange Fee, External product costs, Social Tax, Withholding Tax, Advanced Income Tax - tels qu'ils apparaissent dans le fichier Saxo." />
                 </div>
