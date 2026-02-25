@@ -57,6 +57,12 @@ const COMPTES_LABELS = {
 // ─── Processor ───────────────────────────────────────────────────────────────
 
 function processXLSX(workbook, filterCompte = "ALL") {
+  // ── Détection automatique du broker par signature de fichier ──
+  const sheetNames = workbook.SheetNames;
+  const isSaxo = sheetNames.includes("Montants cumulés") && sheetNames.includes("B P");
+  const isIBKR = sheetNames.some(s => s.toLowerCase().includes("activity"));
+  const broker = isSaxo ? "Saxo Bank" : isIBKR ? "Interactive Brokers" : "Broker inconnu";
+
   const sheetMain = workbook.Sheets["Montants cumulés"] || workbook.Sheets[workbook.SheetNames[0]];
   const sheetPerf = workbook.Sheets["Performance"];
   const sheetBP   = workbook.Sheets["B P"];
@@ -228,6 +234,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
   const ventilationArr = Object.values(ventilation).filter(v => v.pl !== 0 || v.buys > 0);
 
   return {
+    broker,
     kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
     months: sortedMonths,
@@ -350,7 +357,7 @@ function buildPDF(data, filterLabel) {
       <td class="num ${pl >= 0 ? "pos" : "neg"}">${fmtEur(pl)}</td></tr>`;
   };
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
-<title>Rapport Saxo ${new Date().toLocaleDateString("fr-FR")}</title>
+<title>Rapport ${broker} ${new Date().toLocaleDateString("fr-FR")}</title>
 <style>
   @page{margin:18mm}*{box-sizing:border-box}
   body{font-family:'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;margin:0;padding:20px}
@@ -367,14 +374,14 @@ function buildPDF(data, filterLabel) {
   td{padding:7px 10px;border-bottom:1px solid #f1f5f9}tr:nth-child(even) td{background:#f8fafc}
   .num{text-align:right}.footer{text-align:center;color:#94a3b8;font-size:10px;margin-top:36px}
 </style></head><body><div class="page">
-  <h1>📊 Rapport Portefeuille Saxo</h1>
+  <h1>📊 Rapport Portefeuille ${broker}</h1>
   <div class="sub">Généré le ${new Date().toLocaleDateString("fr-FR")} · ${filterLabel} · ${positions.length} positions</div>
   <h2>Performance Globale</h2>
   <div class="g4">
     <div class="card"><div class="card-l">Valeur Totale</div><div class="card-v">${fmtEur(kpis.valeurTotale)}</div></div>
     <div class="card"><div class="card-l">Capital Net</div><div class="card-v">${fmtEur(kpis.netDeposits)}</div></div>
     <div class="card"><div class="card-l">Résultat Net</div><div class="card-v ${kpis.netResult >= 0 ? "pos" : "neg"}">${fmtEur(kpis.netResult)}</div></div>
-    <div class="card"><div class="card-l">TWR Saxo</div><div class="card-v ${kpis.twr >= 0 ? "pos" : "neg"}">${fmtPct(kpis.twr)}</div></div>
+    <div class="card"><div class="card-l">TWR Officiel</div><div class="card-v ${kpis.twr >= 0 ? "pos" : "neg"}">${fmtPct(kpis.twr)}</div></div>
   </div>
   <div class="g4">
     <div class="card"><div class="card-l">Dépôts</div><div class="card-v">${fmtEur(kpis.deposits)}</div></div>
@@ -397,7 +404,7 @@ function buildPDF(data, filterLabel) {
   <h2>Toutes les Positions (${positions.length})</h2>
   <table><thead><tr><th>Symbole</th><th>Nom</th><th class="num">Achats</th><th class="num">Ventes</th><th class="num">P&L Net</th></tr></thead>
   <tbody>${positions.map(posRow).join("")}</tbody></table>
-  <div class="footer">Saxo Analyzer · ${new Date().toLocaleString("fr-FR")}</div>
+  <div class="footer">${broker} Analyzer · ${new Date().toLocaleString("fr-FR")}</div>
 </div></body></html>`;
 }
 
@@ -466,7 +473,7 @@ function PositionsTable({ positions }) {
     <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
       <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">
         {positions.length} positions
-        <InfoTooltip text="P&L Net = gains/pertes réalisés (source onglet B/P Saxo). Cliquez sur un en-tête de colonne pour trier. Cliquez à nouveau pour inverser." />
+        <InfoTooltip text="P&L Net = gains/pertes réalisés (source onglet B/P). Cliquez sur un en-tête de colonne pour trier. Cliquez à nouveau pour inverser." />
         <span className="ml-2 text-white/30 text-xs">· cliquez sur un en-tête pour trier</span>
       </div>
       <div className="overflow-x-auto">
@@ -479,7 +486,7 @@ function PositionsTable({ positions }) {
               <th className="text-left text-indigo-300 py-3 px-4 font-semibold text-xs uppercase tracking-wide">Nom</th>
               <SortTh label="Achats"   colKey="buys"   tooltip="Montant total investi (achats nets). Cliquez pour trier." />
               <SortTh label="Ventes"   colKey="sells"  tooltip="Montant total encaissé sur les cessions." />
-              <SortTh label="P&L Net"  colKey="pl"     tooltip="Bénéfice ou perte réalisé. Source onglet B/P Saxo." />
+              <SortTh label="P&L Net"  colKey="pl"     tooltip="Bénéfice ou perte réalisé. Source onglet B/P du fichier." />
               <SortTh label="P&L %"    colKey="plpct"  tooltip="P&L Net / Achats × 100. Rendement réalisé sur le capital investi dans ce titre." />
               <SortTh label="Trades"   colKey="trades" tooltip="Nombre d'opérations (achats + ventes) exécutées sur ce titre." />
             </tr>
@@ -704,9 +711,9 @@ function AnnualView({ data }) {
           {/* KPIs principaux */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatBlock label="TWR" valueA={statsA.twrAnnuel} valueB={statsB?.twrAnnuel} format="pct"
-              tooltip="Time-Weighted Return annuel : variation du TWR cumulé Saxo entre le 1er et dernier jour de l’annee. Mesure la performance pure indépendamment des flux." />
+              tooltip="Time-Weighted Return annuel : variation du TWR cumulé entre le 1er et dernier jour de l’annee. Mesure la performance pure indépendamment des flux." />
             <StatBlock label="P&L Réalisé" valueA={statsA.pl} valueB={statsB?.pl}
-              tooltip="Bénéfices et pertes réalisés sur les cessions de la période (source onglet B/P Saxo)." />
+              tooltip="Bénéfices et pertes réalisés sur les cessions de la période (source onglet B/P)." />
             <StatBlock label="Résultat Net" valueA={statsA.resultat} valueB={statsB?.resultat}
               tooltip="P&L réalisé + dividendes + intérêts – frais totaux de l’annee." />
             <StatBlock label="Capital Investi" valueA={statsA.deposits} valueB={statsB?.deposits}
@@ -754,7 +761,7 @@ function AnnualView({ data }) {
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <h3 className="text-white font-semibold mb-4 flex items-center text-sm uppercase tracking-widest">
               Performance Mensuelle (TWR Δ%)
-              <InfoTooltip text="Variation mensuelle du TWR cumule Saxo. Barre verte = mois positif, rouge = negatif. Activer Comparer pour superposer une autre annee." />
+              <InfoTooltip text="Variation mensuelle du TWR cumule. Barre verte = mois positif, rouge = negatif. Activer Comparer pour superposer une autre annee." />
 
 
             </h3>
@@ -844,7 +851,7 @@ function AnnualView({ data }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-export default function SaxoAnalyzer() {
+export default function PortfolioAnalyzer() {
   const [workbook, setWorkbook] = useState(null);
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(false);
@@ -890,10 +897,10 @@ export default function SaxoAnalyzer() {
     const { kpis, positions } = data;
     const rows = [
       ["KPI", "Valeur"],
-      ["Valeur Totale Saxo", kpis.valeurTotale],
+      ["Valeur Totale (officiel broker)", kpis.valeurTotale],
       ["Capital Net Investi", kpis.netDeposits],
       ["Résultat Net", kpis.netResult.toFixed(2)],
-      ["TWR Saxo", kpis.twr.toFixed(4) + "%"],
+      ["TWR Officiel", kpis.twr.toFixed(4) + "%"],
       ["Dépôts", kpis.deposits], ["Retraits", kpis.withdrawals],
       ["Dividendes", kpis.dividends], ["Intérêts", kpis.interest],
       ["Commissions", kpis.fees.commission], ["Taxes FFT", kpis.fees.tax],
@@ -916,7 +923,7 @@ export default function SaxoAnalyzer() {
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-4 mb-7">
           <div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">📊 Saxo Analyzer</h1>
+            <h1 className="text-3xl font-bold text-white tracking-tight">📊 {data?.broker || "Portfolio"} Analyzer</h1>
             {fileName && <p className="text-indigo-400 text-xs mt-1">{fileName}</p>}
           </div>
           {data && (
@@ -940,9 +947,9 @@ export default function SaxoAnalyzer() {
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}>
               <div className="text-6xl mb-4">📂</div>
-              <p className="text-white text-xl font-semibold mb-2">Glissez votre fichier XLSX Saxo ici</p>
+              <p className="text-white text-xl font-semibold mb-2">Glissez votre fichier d'export ici</p>
               <p className="text-indigo-300 text-sm mb-1">ou cliquez pour sélectionner</p>
-              <p className="text-indigo-500 text-xs font-mono mt-2">AggregatedAmounts_XXXXXXXX_YYYY-MM-DD_YYYY-MM-DD.xlsx</p>
+              <p className="text-indigo-500 text-xs font-mono mt-2">AggregatedAmounts_*.xlsx · Saxo Bank</p>
               <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
             </div>
           </label>
@@ -967,10 +974,10 @@ export default function SaxoAnalyzer() {
             {tab === "overview" && (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <KpiCard label="Valeur Totale" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur totale du portefeuille au dernier jour calculé par Saxo (onglet Performance du fichier)." />
+                  <KpiCard label="Valeur Totale" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur totale du portefeuille au dernier jour calculé par (onglet Performance du fichier)." />
                   <KpiCard label="Capital Net Investi" value={fmtEur(data.kpis.netDeposits)} icon="💶" color="indigo" tooltip="Dépôts cumulés moins les retraits. Représente le capital réellement engagé depuis l’ouverture du compte." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} sub={fmtPct(data.kpis.perfPct)} icon="📈" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé + dividendes + intérêts – frais totaux. Le % est calculé sur le capital net investi." />
-                  <KpiCard label="TWR Saxo" value={fmtPct(data.kpis.twr)} icon="🎯" color={data.kpis.twr >= 0 ? "teal" : "red"} tooltip="Time-Weighted Return : mesure la performance pure des investissements indépendamment des entrées/sorties de capital. Chiffre officiel Saxo." />
+                  <KpiCard label="TWR Officiel" value={fmtPct(data.kpis.twr)} icon="🎯" color={data.kpis.twr >= 0 ? "teal" : "red"} tooltip="Time-Weighted Return : mesure la performance pure des investissements indépendamment des entrées/sorties de capital. Chiffre officiel Saxo." />
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Dépôts" value={fmtEur(data.kpis.deposits)} icon="⬆️" color="indigo" tooltip="Total des virements entrants (Cash Amount positifs) sur la période analysée." />
@@ -1008,7 +1015,7 @@ export default function SaxoAnalyzer() {
             {tab === "performance" && (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <KpiCard label="TWR (Saxo officiel)" value={fmtPct(data.kpis.twr)} icon="🎯" color="teal" sub="Time-Weighted Return" tooltip="Rendement pondéré dans le temps : élimine l’effet des dépôts/retraits pour mesurer la pure performance de la gestion. Standard CFA/GIPS." />
+                  <KpiCard label={`TWR (${data.broker})`} value={fmtPct(data.kpis.twr)} icon="🎯" color="teal" sub="Time-Weighted Return" tooltip="Rendement pondéré dans le temps : élimine l’effet des dépôts/retraits pour mesurer la pure performance de la gestion. Standard CFA/GIPS." />
                   <KpiCard label="Valeur Portefeuille" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur de marché totale du portefeuille au dernier jour disponible dans le fichier." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} icon="📊" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé (onglet B/P Saxo) + dividendes + intérêts – frais totaux." />
                 </div>
@@ -1071,7 +1078,7 @@ export default function SaxoAnalyzer() {
                 {data.perfSeries.length > 0 && (
                   <>
                     <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                      <h3 className="text-white font-semibold mb-4 flex items-center">TWR Cumulé<InfoTooltip text="Time-Weighted Return cumulé depuis le début de la période. Mesure la performance de la gestion indépendamment des flux de trésorerie. Source : onglet ’Performance’ du fichier Saxo." /></h3>
+                      <h3 className="text-white font-semibold mb-4 flex items-center">TWR Cumulé (officiel)<InfoTooltip text="Time-Weighted Return cumulé depuis le début de la période. Mesure la performance de la gestion indépendamment des flux de trésorerie. Source : onglet ’Performance’ du fichier Saxo." /></h3>
                       <ResponsiveContainer width="100%" height={260}>
                         <AreaChart data={data.perfSeries}>
                           <defs>
@@ -1110,7 +1117,7 @@ export default function SaxoAnalyzer() {
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                    <h3 className="text-white font-semibold mb-4 flex items-center">🏆 Top 10 P&L<InfoTooltip text="10 positions ayant généré le plus grand gain réalisé sur la période. P&L = Prix de vente – Prix d’achat (hors frais), source onglet B/P Saxo." /></h3>
+                    <h3 className="text-white font-semibold mb-4 flex items-center">🏆 Top 10 P&L<InfoTooltip text="10 positions ayant généré le plus grand gain réalisé sur la période. P&L = Prix de vente – Prix d’achat (hors frais), source onglet B/P." /></h3>
                     <div className="space-y-2">
                       {data.positions.slice(0, 10).map((p, i) => {
                         const pl = p.plNet ?? p.realized;
