@@ -365,6 +365,98 @@ const TABS = [
 ];
 
 
+
+// ─── Composant PositionsTable avec tri ───────────────────────────────────────
+
+function PositionsTable({ positions }) {
+  const [sortKey, setSortKey] = useState("pl");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir(d => d === "desc" ? "asc" : "desc");
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const sorted = [...positions].sort((a, b) => {
+    const plA = a.plNet ?? a.realized;
+    const plB = b.plNet ?? b.realized;
+    let va, vb;
+    if (sortKey === "pl")     { va = plA; vb = plB; }
+    else if (sortKey === "plpct") { va = a.buys > 0 ? plA / a.buys : 0; vb = b.buys > 0 ? plB / b.buys : 0; }
+    else if (sortKey === "buys")  { va = a.buys; vb = b.buys; }
+    else if (sortKey === "sells") { va = a.sells; vb = b.sells; }
+    else if (sortKey === "trades"){ va = a.trades; vb = b.trades; }
+    else if (sortKey === "sym")   { va = a.sym; vb = b.sym; return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); }
+    else { va = plA; vb = plB; }
+    return sortDir === "asc" ? va - vb : vb - va;
+  });
+
+  const SortTh = ({ label, colKey, align = "right", tooltip }) => {
+    const active = sortKey === colKey;
+    const arrow = active ? (sortDir === "desc" ? " ↓" : " ↑") : " ↕";
+    return (
+      <th
+        onClick={() => handleSort(colKey)}
+        className={`py-3 px-4 font-semibold cursor-pointer select-none transition-colors hover:text-white text-xs uppercase tracking-wide ${align === "left" ? "text-left" : "text-right"} ${active ? "text-white" : "text-indigo-300"}`}
+        style={{ userSelect: "none" }}
+      >
+        <span className="flex items-center gap-1 justify-end">
+          {tooltip && <InfoTooltip text={tooltip} />}
+          {label}
+          <span className={`text-xs ${active ? "text-indigo-400" : "text-white/20"}`}>{arrow}</span>
+        </span>
+      </th>
+    );
+  };
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+      <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">
+        {positions.length} positions
+        <InfoTooltip text="P&L Net = gains/pertes réalisés (source onglet B/P Saxo). Cliquez sur un en-tête de colonne pour trier. Cliquez à nouveau pour inverser." />
+        <span className="ml-2 text-white/30 text-xs">· cliquez sur un en-tête pour trier</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-white/5">
+              <th onClick={() => handleSort("sym")} className={`text-left py-3 px-4 font-semibold cursor-pointer select-none transition-colors hover:text-white text-xs uppercase tracking-wide ${sortKey === "sym" ? "text-white" : "text-indigo-300"}`}>
+                Symbole {sortKey === "sym" ? (sortDir === "desc" ? "↓" : "↑") : <span className="text-white/20">↕</span>}
+              </th>
+              <th className="text-left text-indigo-300 py-3 px-4 font-semibold text-xs uppercase tracking-wide">Nom</th>
+              <SortTh label="Achats"   colKey="buys"   tooltip="Montant total investi (achats nets). Cliquez pour trier." />
+              <SortTh label="Ventes"   colKey="sells"  tooltip="Montant total encaissé sur les cessions." />
+              <SortTh label="P&L Net"  colKey="pl"     tooltip="Bénéfice ou perte réalisé. Source onglet B/P Saxo." />
+              <SortTh label="P&L %"    colKey="plpct"  tooltip="P&L Net / Achats × 100. Rendement réalisé sur le capital investi dans ce titre." />
+              <SortTh label="Trades"   colKey="trades" tooltip="Nombre d'opérations (achats + ventes) exécutées sur ce titre." />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((p, i) => {
+              const pl = p.plNet ?? p.realized;
+              return (
+                <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                  <td className="py-2.5 px-4 text-white font-mono font-semibold">{p.sym}</td>
+                  <td className="py-2.5 px-4 text-indigo-200 max-w-xs truncate">{p.name}</td>
+                  <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.buys)}</td>
+                  <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.sells)}</td>
+                  <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur2(pl)}</td>
+                  <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{p.buys > 0 ? fmtPct(pl / p.buys * 100) : "—"}</td>
+                  <td className="py-2.5 px-4 text-right text-indigo-300">{p.trades}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers calculs annuels ──────────────────────────────────────────────────
 
 function buildYearStats(year, data) {
@@ -1126,42 +1218,8 @@ export default function SaxoAnalyzer() {
 
             {/* Positions */}
             {tab === "positions" && (
-              <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">{data.positions.length} positions · triées par P&L Net réalisé<InfoTooltip text="P&L Net = somme des gains/pertes journaliers réalisés par position (source onglet ’B P’ de Saxo). Les positions avec P&L = 0 sont des positions encore ouvertes ou des instruments sans cession." /></div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-white/5">
-                        <th className="text-left text-indigo-300 py-3 px-4 font-semibold">Symbole</th>
-                        <th className="text-left text-indigo-300 py-3 px-4 font-semibold">Nom</th>
-                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Achats</th>
-                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Ventes</th>
-                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">P&L Net</th>
-                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">P&L %</th>
-                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Trades</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.positions.map((p, i) => {
-                        const pl = p.plNet ?? p.realized;
-                        return (
-                          <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                            <td className="py-2.5 px-4 text-white font-mono font-semibold">{p.sym}</td>
-                            <td className="py-2.5 px-4 text-indigo-200 max-w-xs truncate">{p.name}</td>
-                            <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.buys)}</td>
-                            <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.sells)}</td>
-                            <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur2(pl)}</td>
-                            <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{p.buys > 0 ? fmtPct(pl / p.buys * 100) : "—"}</td>
-                            <td className="py-2.5 px-4 text-right text-indigo-300">{p.trades}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <PositionsTable positions={data.positions} />
             )}
-
             {/* Trends */}
             {tab === "trends" && (
               <div className="space-y-5">
