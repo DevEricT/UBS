@@ -1161,7 +1161,7 @@ export default function SaxoAnalyzer() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-white/5">
-                          {["Année","Dépôts","Achats","Ventes","P&L Net","Frais","Dividendes","Résultat","Perf %"].map(h => (
+                          {["Année","Dépôts","Achats","Ventes","P&L Net","P&L %","Frais","Frais %","Dividendes","Résultat","Perf %"].map(h => (
                             <th key={h} className={`py-3 px-4 font-semibold text-indigo-300 text-xs uppercase tracking-wide ${h === "Année" ? "text-left" : "text-right"}`}>{h}</th>
                           ))}
                         </tr>
@@ -1176,7 +1176,9 @@ export default function SaxoAnalyzer() {
                               <td className="py-3 px-4 text-right text-white">{fmtEur(y.buys)}</td>
                               <td className="py-3 px-4 text-right text-white">{fmtEur(y.sells)}</td>
                               <td className={`py-3 px-4 text-right font-semibold ${y.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(y.pl)}</td>
+                              <td className={`py-3 px-4 text-right font-semibold ${y.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{(y.buys + y.sells) > 0 ? fmtPct(y.pl / (y.buys + y.sells) * 100) : "—"}</td>
                               <td className="py-3 px-4 text-right text-amber-400">{y.fees > 0 ? "-" + fmtEur(y.fees) : "—"}</td>
+                              <td className="py-3 px-4 text-right text-amber-400">{(y.buys + y.sells) > 0 && y.fees > 0 ? (y.fees / (y.buys + y.sells) * 100).toFixed(3) + " %" : "—"}</td>
                               <td className="py-3 px-4 text-right text-teal-400">{y.dividends > 0 ? fmtEur(y.dividends + y.interest) : "—"}</td>
                               <td className={`py-3 px-4 text-right font-bold text-base ${resultat >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(resultat)}</td>
                               <td className={`py-3 px-4 text-right font-bold text-base ${resultat >= 0 ? "text-green-400" : "text-red-400"}`}>{y.deposits > 0 ? fmtPct(resultat / y.deposits * 100) : "—"}</td>
@@ -1215,7 +1217,7 @@ export default function SaxoAnalyzer() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-white/5">
-                          {["Trimestre","Dépôts","Achats","Ventes","P&L Net","Frais","Dividendes","Résultat","Perf %"].map(h => (
+                          {["Trimestre","Dépôts","Achats","Ventes","P&L Net","P&L %","Frais","Frais %","Dividendes","Résultat","Perf %"].map(h => (
                             <th key={h} className={`py-3 px-4 font-semibold text-indigo-300 text-xs uppercase tracking-wide ${h === "Trimestre" ? "text-left" : "text-right"}`}>{h}</th>
                           ))}
                         </tr>
@@ -1230,7 +1232,9 @@ export default function SaxoAnalyzer() {
                               <td className="py-2.5 px-4 text-right text-white">{fmtEur(q.buys)}</td>
                               <td className="py-2.5 px-4 text-right text-white">{fmtEur(q.sells)}</td>
                               <td className={`py-2.5 px-4 text-right font-semibold ${q.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(q.pl)}</td>
+                              <td className={`py-2.5 px-4 text-right font-semibold ${q.pl >= 0 ? "text-green-400" : "text-red-400"}`}>{(q.buys + q.sells) > 0 ? fmtPct(q.pl / (q.buys + q.sells) * 100) : "—"}</td>
                               <td className="py-2.5 px-4 text-right text-amber-400">{q.fees > 0 ? "-" + fmtEur(q.fees) : "—"}</td>
+                              <td className="py-2.5 px-4 text-right text-amber-400">{(q.buys + q.sells) > 0 && q.fees > 0 ? (q.fees / (q.buys + q.sells) * 100).toFixed(3) + " %" : "—"}</td>
                               <td className="py-2.5 px-4 text-right text-teal-400">{q.dividends > 0 ? fmtEur(q.dividends + q.interest) : "—"}</td>
                               <td className={`py-2.5 px-4 text-right font-bold ${resultat >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(resultat)}</td>
                               <td className={`py-2.5 px-4 text-right font-bold ${resultat >= 0 ? "text-green-400" : "text-red-400"}`}>{q.deposits > 0 ? fmtPct(resultat / q.deposits * 100) : "—"}</td>
