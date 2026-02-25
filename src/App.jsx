@@ -563,24 +563,24 @@ function AnnualView({ data }) {
           {/* KPIs principaux */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatBlock label="TWR" valueA={statsA.twrAnnuel} valueB={statsB?.twrAnnuel} format="pct"
-              tooltip="Time-Weighted Return annuel : variation du TWR cumulé Saxo entre le 1er et dernier jour de l'annee. Mesure la performance pure indépendamment des flux." />
+              tooltip="Time-Weighted Return annuel : variation du TWR cumulé Saxo entre le 1er et dernier jour de l’annee. Mesure la performance pure indépendamment des flux." />
             <StatBlock label="P&L Réalisé" valueA={statsA.pl} valueB={statsB?.pl}
               tooltip="Bénéfices et pertes réalisés sur les cessions de la période (source onglet B/P Saxo)." />
             <StatBlock label="Résultat Net" valueA={statsA.resultat} valueB={statsB?.resultat}
-              tooltip="P&L réalisé + dividendes + intérêts – frais totaux de l'annee." />
+              tooltip="P&L réalisé + dividendes + intérêts – frais totaux de l’annee." />
             <StatBlock label="Capital Investi" valueA={statsA.deposits} valueB={statsB?.deposits}
-              tooltip="Total des dépôts entrants sur l'annee." />
+              tooltip="Total des dépôts entrants sur l’annee." />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatBlock label="Volatilité Annualisée" valueA={statsA.volatility} valueB={statsB?.volatility} format="pct2"
-              tooltip="Écart-type des rendements journaliers × √252. | Mesure l\'amplitude des fluctuations. < 10% = faible, 10-20% = modérée, > 20% = élevée." />
+              tooltip="Écart-type des rendements journaliers × √252. | Mesure l\’amplitude des fluctuations. < 10% = faible, 10-20% = modérée, > 20% = élevée." />
             <StatBlock label="Ratio Sharpe" valueA={statsA.sharpe} valueB={statsB?.sharpe} format="ratio"
               tooltip="(TWR – taux sans risque 3%) / Volatilité. | > 1 = excellente rémunération du risque | 0-1 = acceptable | < 0 = sous-performant vs sans risque" />
             <StatBlock label="Drawdown Max" valueA={statsA.maxDrawdown} valueB={statsB?.maxDrawdown} format="pct2"
               tooltip="Perte maximale depuis un pic de valorisation. Indicateur du risque de perte en capital." />
             <StatBlock label="Frais" valueA={-statsA.fees} valueB={statsB ? -statsB.fees : null}
-              tooltip="Total des frais prélevés sur l'annee (commissions + FFT + autres)." />
+              tooltip="Total des frais prélevés sur l’annee (commissions + FFT + autres)." />
           </div>
 
           {/* Meilleur / pire mois */}
@@ -589,7 +589,7 @@ function AnnualView({ data }) {
               <span className="text-2xl">🏆</span>
               <div>
                 <div className="text-xs text-white/50 uppercase tracking-widest mb-1 flex items-center gap-1">
-                  Meilleur mois {yearA} <InfoTooltip text="Mois avec la progression de TWR la plus forte de l'annee." />
+                  Meilleur mois {yearA} <InfoTooltip text="Mois avec la progression de TWR la plus forte de l’annee." />
                 </div>
                 <span className="text-white font-bold">{statsA.bestMonth?.month || "—"}</span>
                 <span className="text-green-400 font-bold ml-3">{statsA.bestMonth ? fmtPct(statsA.bestMonth.perf) : "—"}</span>
@@ -600,7 +600,7 @@ function AnnualView({ data }) {
               <span className="text-2xl">📉</span>
               <div>
                 <div className="text-xs text-white/50 uppercase tracking-widest mb-1 flex items-center gap-1">
-                  Pire mois {yearA} <InfoTooltip text="Mois avec la plus forte baisse de TWR de l'annee. Signal d'alerte sur les périodes de stress." />
+                  Pire mois {yearA} <InfoTooltip text="Mois avec la plus forte baisse de TWR de l’annee. Signal d’alerte sur les périodes de stress." />
                 </div>
                 <span className="text-white font-bold">{statsA.worstMonth?.month || "—"}</span>
                 <span className="text-red-400 font-bold ml-3">{statsA.worstMonth ? fmtPct(statsA.worstMonth.perf) : "—"}</span>
@@ -827,7 +827,7 @@ export default function SaxoAnalyzer() {
               <div className="space-y-5">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Valeur Totale" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur totale du portefeuille au dernier jour calculé par Saxo (onglet Performance du fichier)." />
-                  <KpiCard label="Capital Net Investi" value={fmtEur(data.kpis.netDeposits)} icon="💶" color="indigo" tooltip="Dépôts cumulés moins les retraits. Représente le capital réellement engagé depuis l'ouverture du compte." />
+                  <KpiCard label="Capital Net Investi" value={fmtEur(data.kpis.netDeposits)} icon="💶" color="indigo" tooltip="Dépôts cumulés moins les retraits. Représente le capital réellement engagé depuis l’ouverture du compte." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} sub={fmtPct(data.kpis.perfPct)} icon="📈" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé + dividendes + intérêts – frais totaux. Le % est calculé sur le capital net investi." />
                   <KpiCard label="TWR Saxo" value={fmtPct(data.kpis.twr)} icon="🎯" color={data.kpis.twr >= 0 ? "teal" : "red"} tooltip="Time-Weighted Return : mesure la performance pure des investissements indépendamment des entrées/sorties de capital. Chiffre officiel Saxo." />
                 </div>
@@ -840,11 +840,11 @@ export default function SaxoAnalyzer() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Frais Totaux" value={"-" + fmtEur(data.kpis.totalFees)} icon="🏦" color="amber" tooltip="Somme de toutes les charges : commissions, taxe FFT, frais de change, taxes sociales." />
                   <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} icon="📋" color="amber" tooltip="Frais de courtage facturés par Saxo sur chaque ordre exécuté." />
-                  <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="Taxe sur les Transactions Financières française (0,3%) applicable aux achats d'actions françaises de plus de 1 milliard de capitalisation." />
+                  <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="Taxe sur les Transactions Financières française (0,3%) applicable aux achats d’actions françaises de plus de 1 milliard de capitalisation." />
                   <KpiCard label="Ratio frais/capital" value={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(2) + " %" : "N/A"} icon="⚖️" color="amber" tooltip="Frais totaux divisés par le capital net investi. Indicateur du coût de gestion du portefeuille." />
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-4 flex items-center">Répartition des Frais<InfoTooltip text="Ventilation des frais par nature : courtage (commissions), taxe FFT, frais d'échange de devises, et autres (taxes sociales, retenues)." /></h3>
+                  <h3 className="text-white font-semibold mb-4 flex items-center">Répartition des Frais<InfoTooltip text="Ventilation des frais par nature : courtage (commissions), taxe FFT, frais d’échange de devises, et autres (taxes sociales, retenues)." /></h3>
                   <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
                       <Pie data={[
@@ -867,14 +867,14 @@ export default function SaxoAnalyzer() {
             {tab === "performance" && (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <KpiCard label="TWR (Saxo officiel)" value={fmtPct(data.kpis.twr)} icon="🎯" color="teal" sub="Time-Weighted Return" tooltip="Rendement pondéré dans le temps : élimine l'effet des dépôts/retraits pour mesurer la pure performance de la gestion. Standard CFA/GIPS." />
+                  <KpiCard label="TWR (Saxo officiel)" value={fmtPct(data.kpis.twr)} icon="🎯" color="teal" sub="Time-Weighted Return" tooltip="Rendement pondéré dans le temps : élimine l’effet des dépôts/retraits pour mesurer la pure performance de la gestion. Standard CFA/GIPS." />
                   <KpiCard label="Valeur Portefeuille" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur de marché totale du portefeuille au dernier jour disponible dans le fichier." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} icon="📊" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé (onglet B/P Saxo) + dividendes + intérêts – frais totaux." />
                 </div>
                 {/* Ventilation B/P par catégorie */}
                 {data.ventilation && data.ventilation.length > 0 && (
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                    <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Ventilation B/P par Catégorie<InfoTooltip text="B/P = Bénéfices et Pertes réalisés. Décomposition du résultat par type d'instrument : Actions (Stock), ETFs, OPCVM (Mutual Funds). Source : onglet 'B P' du fichier Saxo." /></h3>
+                    <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Ventilation B/P par Catégorie<InfoTooltip text="B/P = Bénéfices et Pertes réalisés. Décomposition du résultat par type d’instrument : Actions (Stock), ETFs, OPCVM (Mutual Funds). Source : onglet ’B P’ du fichier Saxo." /></h3>
                     <div className="overflow-x-auto mb-5">
                       <table className="w-full text-sm">
                         <thead>
@@ -930,7 +930,7 @@ export default function SaxoAnalyzer() {
                 {data.perfSeries.length > 0 && (
                   <>
                     <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                      <h3 className="text-white font-semibold mb-4 flex items-center">TWR Cumulé<InfoTooltip text="Time-Weighted Return cumulé depuis le début de la période. Mesure la performance de la gestion indépendamment des flux de trésorerie. Source : onglet 'Performance' du fichier Saxo." /></h3>
+                      <h3 className="text-white font-semibold mb-4 flex items-center">TWR Cumulé<InfoTooltip text="Time-Weighted Return cumulé depuis le début de la période. Mesure la performance de la gestion indépendamment des flux de trésorerie. Source : onglet ’Performance’ du fichier Saxo." /></h3>
                       <ResponsiveContainer width="100%" height={260}>
                         <AreaChart data={data.perfSeries}>
                           <defs>
@@ -948,7 +948,7 @@ export default function SaxoAnalyzer() {
                       </ResponsiveContainer>
                     </div>
                     <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                      <h3 className="text-white font-semibold mb-4 flex items-center">Valeur du Portefeuille<InfoTooltip text="Valeur totale du compte jour par jour incluant liquidités et positions ouvertes valorisées au prix de marché. Source : onglet 'Performance' du fichier Saxo." /></h3>
+                      <h3 className="text-white font-semibold mb-4 flex items-center">Valeur du Portefeuille<InfoTooltip text="Valeur totale du compte jour par jour incluant liquidités et positions ouvertes valorisées au prix de marché. Source : onglet ’Performance’ du fichier Saxo." /></h3>
                       <ResponsiveContainer width="100%" height={230}>
                         <AreaChart data={data.perfSeries}>
                           <defs>
@@ -969,7 +969,7 @@ export default function SaxoAnalyzer() {
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                    <h3 className="text-white font-semibold mb-4 flex items-center">🏆 Top 10 P&L<InfoTooltip text="10 positions ayant généré le plus grand gain réalisé sur la période. P&L = Prix de vente – Prix d'achat (hors frais), source onglet B/P Saxo." /></h3>
+                    <h3 className="text-white font-semibold mb-4 flex items-center">🏆 Top 10 P&L<InfoTooltip text="10 positions ayant généré le plus grand gain réalisé sur la période. P&L = Prix de vente – Prix d’achat (hors frais), source onglet B/P Saxo." /></h3>
                     <div className="space-y-2">
                       {data.positions.slice(0, 10).map((p, i) => {
                         const pl = p.plNet ?? p.realized;
@@ -1015,7 +1015,7 @@ export default function SaxoAnalyzer() {
 
                 {/* Par année */}
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Performance Annuelle<InfoTooltip text="Résultat = P&L réalisé + dividendes + intérêts – frais de l'annee.&#10;Perf % = Résultat / Dépôts de l'année (rendement simple sur capital investi dans la période)." /></h3>
+                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Performance Annuelle<InfoTooltip text="Résultat = P&L réalisé + dividendes + intérêts – frais de l’annee. | Perf % = Résultat / Dépôts de l’année (rendement simple sur capital investi dans la période)." /></h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -1069,7 +1069,7 @@ export default function SaxoAnalyzer() {
 
                 {/* Par trimestre */}
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Performance Trimestrielle<InfoTooltip text="Découpage en 4 trimestres : Q1 (janv-mars), Q2 (avr-juin), Q3 (juil-sept), Q4 (oct-déc).&#10;Permet d'identifier les saisonnalités et les périodes de sur/sous-performance." /></h3>
+                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Performance Trimestrielle<InfoTooltip text="Découpage en 4 trimestres : Q1 (janv-mars), Q2 (avr-juin), Q3 (juil-sept), Q4 (oct-déc). | Permet d’identifier les saisonnalités et les périodes de sur/sous-performance." /></h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -1127,7 +1127,7 @@ export default function SaxoAnalyzer() {
             {/* Positions */}
             {tab === "positions" && (
               <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-                <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">{data.positions.length} positions · triées par P&L Net réalisé<InfoTooltip text="P&L Net = somme des gains/pertes journaliers réalisés par position (source onglet 'B P' de Saxo). Les positions avec P&L = 0 sont des positions encore ouvertes ou des instruments sans cession." /></div>
+                <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">{data.positions.length} positions · triées par P&L Net réalisé<InfoTooltip text="P&L Net = somme des gains/pertes journaliers réalisés par position (source onglet ’B P’ de Saxo). Les positions avec P&L = 0 sont des positions encore ouvertes ou des instruments sans cession." /></div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1164,7 +1164,7 @@ export default function SaxoAnalyzer() {
             {tab === "trends" && (
               <div className="space-y-5">
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-4 flex items-center">Dépôts Mensuels<InfoTooltip text="Virements entrants mensuels (Cash Amount positifs). Permet de visualiser la stratégie d'apport progressif en capital (DCA ou versements ponctuels)." /></h3>
+                  <h3 className="text-white font-semibold mb-4 flex items-center">Dépôts Mensuels<InfoTooltip text="Virements entrants mensuels (Cash Amount positifs). Permet de visualiser la stratégie d’apport progressif en capital (DCA ou versements ponctuels)." /></h3>
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={data.months}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
@@ -1176,7 +1176,7 @@ export default function SaxoAnalyzer() {
                   </ResponsiveContainer>
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-4 flex items-center">Achats vs Ventes Mensuels<InfoTooltip text="Volume mensuel d'achats (Share Amount négatif = sortie de cash) et de ventes (Share Amount positif = entrée de cash). Un mois avec ventes >> achats peut indiquer un désengagement ou une prise de profit." /></h3>
+                  <h3 className="text-white font-semibold mb-4 flex items-center">Achats vs Ventes Mensuels<InfoTooltip text="Volume mensuel d’achats (Share Amount négatif = sortie de cash) et de ventes (Share Amount positif = entrée de cash). Un mois avec ventes >> achats peut indiquer un désengagement ou une prise de profit." /></h3>
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={data.months}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
@@ -1190,7 +1190,7 @@ export default function SaxoAnalyzer() {
                   </ResponsiveContainer>
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-4 flex items-center">Frais & Dividendes Mensuels<InfoTooltip text="Suivi mensuel des frais (coût de l'activité) et des revenus passifs (dividendes + intérêts). Idéal pour évaluer si les revenus couvrent les coûts de transaction." /></h3>
+                  <h3 className="text-white font-semibold mb-4 flex items-center">Frais & Dividendes Mensuels<InfoTooltip text="Suivi mensuel des frais (coût de l’activité) et des revenus passifs (dividendes + intérêts). Idéal pour évaluer si les revenus couvrent les coûts de transaction." /></h3>
                   <ResponsiveContainer width="100%" height={220}>
                     <LineChart data={data.months}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
@@ -1213,11 +1213,11 @@ export default function SaxoAnalyzer() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Total Frais" value={"-"+fmtEur(data.kpis.totalFees)} icon="💸" color="red" tooltip="Somme de toutes les charges prélevées : courtage, FFT, frais de change, taxes sociales et retenues à la source." />
                   <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} icon="🏦" color="amber" tooltip="Frais de courtage Saxo sur les ordres exécutés. Typiquement 0,10% min 4€ sur actions européennes." />
-                  <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="French Financial Transaction Tax (0,3%) sur les achats d'actions françaises de plus de 1 Md€ de capitalisation." />
+                  <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="French Financial Transaction Tax (0,3%) sur les achats d’actions françaises de plus de 1 Md€ de capitalisation." />
                   <KpiCard label="Exchange + Autres" value={"-"+fmtEur(data.kpis.fees.exchange + data.kpis.fees.other)} icon="🔄" color="amber" tooltip="Frais de bourse (Exchange Fee), coûts externes (External product costs), taxes sociales et retenues à la source sur dividendes étrangers." />
                 </div>
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-4 flex items-center">Frais Mensuels<InfoTooltip text="Évolution mensuelle du total des frais prélevés. Un pic peut indiquer un mois d'activité intense ou un achat de fonds avec droits d'entrée." /></h3>
+                  <h3 className="text-white font-semibold mb-4 flex items-center">Frais Mensuels<InfoTooltip text="Évolution mensuelle du total des frais prélevés. Un pic peut indiquer un mois d’activité intense ou un achat de fonds avec droits d’entrée." /></h3>
                   <ResponsiveContainer width="100%" height={260}>
                     <BarChart data={data.months}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
