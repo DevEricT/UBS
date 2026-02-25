@@ -535,20 +535,22 @@ function buildYearStats(year, data) {
     twrAnnuel = yearSeries[0].twr;
   }
 
-  // Rendements journaliers pour volatilité
+  // Rendements journaliers pour volatilité (valeurs en fraction ex: -0.004 = -0.4%)
   const dailyReturns = yearSeries
     .map(r => r.dailyPct || 0)
     .filter(v => v !== 0);
 
-  // Volatilité = écart-type * sqrt(252)
+  // Volatilité annualisée = écart-type des rendements journaliers * sqrt(252)
+  // Les dailyPct sont en fraction → on multiplie par 100 pour avoir des %
   let volatility = 0;
   if (dailyReturns.length > 1) {
-    const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
-    const variance = dailyReturns.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (dailyReturns.length - 1);
+    const returns_pct = dailyReturns.map(r => r * 100);
+    const mean = returns_pct.reduce((a, b) => a + b, 0) / returns_pct.length;
+    const variance = returns_pct.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (returns_pct.length - 1);
     volatility = Math.sqrt(variance) * Math.sqrt(252);
   }
 
-  // Ratio Sharpe (taux sans risque ~3%)
+  // Ratio Sharpe (taux sans risque ~3% annualisé)
   const sharpe = volatility > 0 ? ((twrAnnuel - 3) / volatility) : 0;
 
   // Drawdown max
