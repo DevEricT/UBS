@@ -563,29 +563,24 @@ function AnnualView({ data }) {
           {/* KPIs principaux */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatBlock label="TWR" valueA={statsA.twrAnnuel} valueB={statsB?.twrAnnuel} format="pct"
-              tooltip="Time-Weighted Return annuel : variation du TWR cumulé Saxo entre le 1er et dernier jour de l'année. Mesure la performance pure indépendamment des flux." />
+              tooltip="Time-Weighted Return annuel : variation du TWR cumulé Saxo entre le 1er et dernier jour de l'annee. Mesure la performance pure indépendamment des flux." />
             <StatBlock label="P&L Réalisé" valueA={statsA.pl} valueB={statsB?.pl}
               tooltip="Bénéfices et pertes réalisés sur les cessions de la période (source onglet B/P Saxo)." />
             <StatBlock label="Résultat Net" valueA={statsA.resultat} valueB={statsB?.resultat}
-              tooltip="P&L réalisé + dividendes + intérêts – frais totaux de l'année." />
+              tooltip="P&L réalisé + dividendes + intérêts – frais totaux de l'annee." />
             <StatBlock label="Capital Investi" valueA={statsA.deposits} valueB={statsB?.deposits}
-              tooltip="Total des dépôts entrants sur l'année." />
+              tooltip="Total des dépôts entrants sur l'annee." />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <StatBlock label="Volatilité Annualisée" valueA={statsA.volatility} valueB={statsB?.volatility} format="pct2"
-              tooltip={"Écart-type des rendements journaliers × √252.
-Mesure l'amplitude des fluctuations. < 10% = faible, 10-20% = modérée, > 20% = élevée."} />
+              tooltip="Écart-type des rendements journaliers × √252. | Mesure l\'amplitude des fluctuations. < 10% = faible, 10-20% = modérée, > 20% = élevée." />
             <StatBlock label="Ratio Sharpe" valueA={statsA.sharpe} valueB={statsB?.sharpe} format="ratio"
-              tooltip={"(TWR – taux sans risque 3%) / Volatilité.
-> 1 = excellente rémunération du risque
-0-1 = acceptable
-< 0 = sous-performant vs sans risque"} />
+              tooltip="(TWR – taux sans risque 3%) / Volatilité. | > 1 = excellente rémunération du risque | 0-1 = acceptable | < 0 = sous-performant vs sans risque" />
             <StatBlock label="Drawdown Max" valueA={statsA.maxDrawdown} valueB={statsB?.maxDrawdown} format="pct2"
-              tooltip={"Perte maximale depuis un pic de valorisation sur l'année.
-Indicateur clé du risque de perte en capital." } />
+              tooltip="Perte maximale depuis un pic de valorisation. Indicateur du risque de perte en capital." />
             <StatBlock label="Frais" valueA={-statsA.fees} valueB={statsB ? -statsB.fees : null}
-              tooltip="Total des frais prélevés sur l'année (commissions + FFT + autres)." />
+              tooltip="Total des frais prélevés sur l'annee (commissions + FFT + autres)." />
           </div>
 
           {/* Meilleur / pire mois */}
@@ -594,7 +589,7 @@ Indicateur clé du risque de perte en capital." } />
               <span className="text-2xl">🏆</span>
               <div>
                 <div className="text-xs text-white/50 uppercase tracking-widest mb-1 flex items-center gap-1">
-                  Meilleur mois {yearA} <InfoTooltip text="Mois avec la progression de TWR la plus forte de l'année." />
+                  Meilleur mois {yearA} <InfoTooltip text="Mois avec la progression de TWR la plus forte de l'annee." />
                 </div>
                 <span className="text-white font-bold">{statsA.bestMonth?.month || "—"}</span>
                 <span className="text-green-400 font-bold ml-3">{statsA.bestMonth ? fmtPct(statsA.bestMonth.perf) : "—"}</span>
@@ -605,7 +600,7 @@ Indicateur clé du risque de perte en capital." } />
               <span className="text-2xl">📉</span>
               <div>
                 <div className="text-xs text-white/50 uppercase tracking-widest mb-1 flex items-center gap-1">
-                  Pire mois {yearA} <InfoTooltip text="Mois avec la plus forte baisse de TWR de l'année. Signal d'alerte sur les périodes de stress." />
+                  Pire mois {yearA} <InfoTooltip text="Mois avec la plus forte baisse de TWR de l'annee. Signal d'alerte sur les périodes de stress." />
                 </div>
                 <span className="text-white font-bold">{statsA.worstMonth?.month || "—"}</span>
                 <span className="text-red-400 font-bold ml-3">{statsA.worstMonth ? fmtPct(statsA.worstMonth.perf) : "—"}</span>
@@ -1020,7 +1015,7 @@ export default function SaxoAnalyzer() {
 
                 {/* Par année */}
                 <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Performance Annuelle<InfoTooltip text="Résultat = P&L réalisé + dividendes + intérêts – frais de l'année.&#10;Perf % = Résultat / Dépôts de l'année (rendement simple sur capital investi dans la période)." /></h3>
+                  <h3 className="text-white font-semibold mb-5 text-sm uppercase tracking-widest flex items-center">Performance Annuelle<InfoTooltip text="Résultat = P&L réalisé + dividendes + intérêts – frais de l'annee.&#10;Perf % = Résultat / Dépôts de l'année (rendement simple sur capital investi dans la période)." /></h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
