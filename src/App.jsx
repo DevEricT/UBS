@@ -1314,17 +1314,19 @@ export default function SaxoAnalyzer() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 text-center space-x-6 flex items-center justify-center flex-wrap gap-3">
-                  <span className="text-indigo-300 text-sm">Ratio frais / capital : </span>
-                  <span className="text-white font-bold">
-                    {data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(3) + " %" : "N/A"}
-                  </span>
-                  <span className="text-indigo-300 text-sm ml-6">Frais / résultat brut : </span>
-                  <span className="text-white font-bold">
-                    {(data.kpis.netResult + data.kpis.totalFees) > 0
-                      ? ((data.kpis.totalFees / (data.kpis.netResult + data.kpis.totalFees)) * 100).toFixed(1) + " %"
-                      : "N/A"}
-                  </span>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <KpiCard label="Frais / Volume total"
+                    value={data.kpis.totalVolume > 0 ? ((data.kpis.totalFees / data.kpis.totalVolume) * 100).toFixed(3) + " %" : "N/A"}
+                    icon="📊" color="amber"
+                    tooltip="Frais totaux / (achats + ventes) : coût effectif moyen de transaction sur le volume total traité." />
+                  <KpiCard label="Frais / Capital investi"
+                    value={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(3) + " %" : "N/A"}
+                    icon="⚖️" color="amber"
+                    tooltip="Frais totaux / capital net investi (dépôts - retraits). Mesure le poids des frais par rapport au capital engagé." />
+                  <KpiCard label="Frais / Résultat brut"
+                    value={(data.kpis.netResult + data.kpis.totalFees) > 0 ? ((data.kpis.totalFees / (data.kpis.netResult + data.kpis.totalFees)) * 100).toFixed(1) + " %" : "N/A"}
+                    icon="🎯" color={(data.kpis.netResult + data.kpis.totalFees) > 0 && (data.kpis.totalFees / (data.kpis.netResult + data.kpis.totalFees)) < 0.2 ? "green" : "red"}
+                    tooltip="Frais / (P&L brut avant frais). Mesure la part des gains capturés par les frais. En dessous de 20% = efficace. Au-dessus de 50% = les frais consomment une grande partie de la performance." />
                 </div>
               </div>
             )}
