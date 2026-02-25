@@ -696,7 +696,7 @@ function AnnualView({ data }) {
         <div className="flex items-center gap-2">
           <span className="text-indigo-300 text-sm font-semibold">Année</span>
           <select value={yearA} onChange={e => setYearA(e.target.value)}
-            className="px-3 py-2 rounded-xl text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-indigo-400">
+            style={{ background: "#1e1b4b", color: "white" }} className="px-3 py-2 rounded-xl text-sm text-white border border-white/20 focus:outline-none focus:border-indigo-400">
             {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
@@ -709,7 +709,7 @@ function AnnualView({ data }) {
           <div className="flex items-center gap-2">
             <span className="text-indigo-300 text-sm font-semibold">vs</span>
             <select value={yearB} onChange={e => setYearB(e.target.value)}
-              className="px-3 py-2 rounded-xl text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-indigo-400">
+              style={{ background: "#1e1b4b", color: "white" }} className="px-3 py-2 rounded-xl text-sm text-white border border-white/20 focus:outline-none focus:border-indigo-400">
               {availableYears.filter(y => y !== yearA).map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
@@ -944,9 +944,10 @@ export default function PortfolioAnalyzer() {
           {data && (
             <div className="flex gap-2 flex-wrap items-center">
               <select value={filterCompte} onChange={(e) => handleFilterChange(e.target.value)}
-                className="px-3 py-2 rounded-xl text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-indigo-400">
-                <option value="ALL">Tous les comptes</option>
-                {data.comptes.map((c) => <option key={c} value={c}>{COMPTES_LABELS[c] || c}</option>)}
+                style={{ background: "#1e1b4b", color: "white" }}
+                className="px-3 py-2 rounded-xl text-sm text-white border border-white/20 focus:outline-none focus:border-indigo-400">
+                <option style={{ background: "#1e1b4b" }} value="ALL" style={{ background: "#1e1b4b" }}>Tous les comptes</option>
+                {data.comptes.map((c) => <option style={{ background: "#1e1b4b" }} key={c} value={c}>{COMPTES_LABELS[c] || c}</option>)}
               </select>
               <button onClick={exportCSV} className="px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/20 hover:bg-white/10 transition-all">⬇️ CSV</button>
               <button onClick={exportPDF} className="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg">📄 PDF</button>
