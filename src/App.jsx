@@ -466,7 +466,7 @@ export default function SaxoAnalyzer() {
                         label={({ name, percent }) => percent > 0.03 ? `${name} ${(percent * 100).toFixed(0)}%` : ""}>
                         {[0,1,2,3].map((i) => <Cell key={i} fill={COLORS[i]} />)}
                       </Pie>
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -496,7 +496,7 @@ export default function SaxoAnalyzer() {
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                           <XAxis dataKey="date" tick={{ fill: "#a5b4fc", fontSize: 10 }} tickCount={8} />
                           <YAxis tick={{ fill: "#a5b4fc", fontSize: 10 }} tickFormatter={(v) => v.toFixed(1) + "%"} />
-                          <Tooltip formatter={(v) => v.toFixed(3) + "%"} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                          <Tooltip formatter={(v) => v.toFixed(3) + "%"} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                           <Area type="monotone" dataKey="twr" name="TWR %" stroke="#6366f1" strokeWidth={2} fill="url(#twrGrad)" dot={false} />
                         </AreaChart>
                       </ResponsiveContainer>
@@ -514,7 +514,7 @@ export default function SaxoAnalyzer() {
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                           <XAxis dataKey="date" tick={{ fill: "#a5b4fc", fontSize: 10 }} tickCount={8} />
                           <YAxis tick={{ fill: "#a5b4fc", fontSize: 10 }} tickFormatter={(v) => (v / 1000).toFixed(0) + "k"} />
-                          <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                          <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                           <Area type="monotone" dataKey="valeur" name="Valeur €" stroke="#14b8a6" strokeWidth={2} fill="url(#valGrad)" dot={false} />
                         </AreaChart>
                       </ResponsiveContainer>
@@ -604,7 +604,7 @@ export default function SaxoAnalyzer() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                       <XAxis dataKey="period" tick={{ fill: "#a5b4fc", fontSize: 12 }} />
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                       <Legend wrapperStyle={{ color: "#a5b4fc" }} />
                       <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]}>
                         {data.years.map((entry, index) => (
@@ -658,7 +658,7 @@ export default function SaxoAnalyzer() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                       <XAxis dataKey="period" tick={{ fill: "#a5b4fc", fontSize: 10 }} />
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                       <Legend wrapperStyle={{ color: "#a5b4fc" }} />
                       <Bar dataKey="pl" name="P&L Net" radius={[4,4,0,0]}>
                         {data.quarters.map((entry, index) => (
@@ -719,7 +719,7 @@ export default function SaxoAnalyzer() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                       <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                       <Bar dataKey="deposits" name="Dépôts" fill="#6366f1" radius={[4,4,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -731,7 +731,7 @@ export default function SaxoAnalyzer() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                       <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => (v/1000).toFixed(0)+"k"} />
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                       <Legend wrapperStyle={{ color: "#a5b4fc" }} />
                       <Bar dataKey="buys" name="Achats" fill="#ec4899" radius={[4,4,0,0]} />
                       <Bar dataKey="sells" name="Ventes" fill="#14b8a6" radius={[4,4,0,0]} />
@@ -745,7 +745,7 @@ export default function SaxoAnalyzer() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                       <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => v.toFixed(0)+"€"} />
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                       <Legend wrapperStyle={{ color: "#a5b4fc" }} />
                       <Line type="monotone" dataKey="fees" name="Frais" stroke="#f59e0b" strokeWidth={2} dot={false} />
                       <Line type="monotone" dataKey="dividends" name="Dividendes" stroke="#10b981" strokeWidth={2} dot={false} />
@@ -772,7 +772,7 @@ export default function SaxoAnalyzer() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
                       <XAxis dataKey="month" tick={{ fill: "#a5b4fc", fontSize: 11 }} />
                       <YAxis tick={{ fill: "#a5b4fc", fontSize: 11 }} tickFormatter={(v) => v.toFixed(0)+"€"} />
-                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8 }} />
+                      <Tooltip formatter={(v) => fmtEur(v)} contentStyle={{ background: "#1e1b4b", border: "1px solid #4338ca", borderRadius: 8, color: "#fff" }} />
                       <Bar dataKey="fees" name="Frais" fill="#f59e0b" radius={[4,4,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
