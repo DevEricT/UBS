@@ -21,6 +21,11 @@ const parseNum = (v) => {
   return isNaN(n) ? 0 : n;
 };
 
+const parseDateStr = (d) => {
+  const p = String(d).split("-");
+  return p.length === 3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`) : new Date(d);
+};
+
 const monthKey = (dateStr) => {
   if (!dateStr) return "??";
   const p = String(dateStr).split("-");
@@ -66,6 +71,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
   const sheetMain = workbook.Sheets["Montants cumulés"] || workbook.Sheets[workbook.SheetNames[0]];
   const sheetPerf = workbook.Sheets["Performance"];
   const sheetBP   = workbook.Sheets["B P"];
+  const sheetMvt  = workbook.Sheets["Mouvements d espèces"];
 
   const toRows = (sheet) => sheet ? XLSX.utils.sheet_to_json(sheet, { defval: null }) : [];
 
@@ -164,6 +170,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
       valeur: parseNum(r["AccountValueTimeSeries"]),
     }));
   const lastPerf = perfSeries[perfSeries.length - 1];
+  const firstPerf = perfSeries[0];
   const twr = lastPerf ? lastPerf.twr : 0;
   const valeurTotale = lastPerf ? lastPerf.valeur : 0;
 
@@ -173,6 +180,25 @@ function processXLSX(workbook, filterCompte = "ALL") {
     if (filterCompte === "ALL") return true;
     return r["ID du compte de comptabilisation"] === filterCompte;
   });
+  // Mouvements d'espèces : Cash Amount uniquement = dépôts/retraits réels
+  const mvtRows = toRows(sheetMvt).filter(r => {
+    if (!r["Date"]) return false;
+    if (filterCompte !== "ALL" && r["ID du compte de comptabilisation"] !== filterCompte) return false;
+    return String(r["Nom du type de montant"]).trim() === "Cash Amount";
+  });
+
+  // Construire les cashflows pour IRR : { date (ISO), amount }
+  // Convention IRR : dépôt = négatif (sortie investisseur), retrait = positif (entrée)
+  const parseDateIRR = (d) => {
+    const p = String(d).split("-");
+    if (p.length === 3) return new Date(`${p[2]}-${p[1]}-${p[0]}`);
+    return new Date(d);
+  };
+  const cashflows = mvtRows.map(r => ({
+    date: parseDateIRR(r["Date"]),
+    amount: -parseNum(r["Montant dans la devise du compte"]), // inversé : dépôt = sortie investisseur
+  })).filter(c => !isNaN(c.date) && c.amount !== 0);
+
   const plMap = {};
   const ventilation = { Stock: { pl: 0, buys: 0, sells: 0, fees: 0, label: "Actions" }, Etf: { pl: 0, buys: 0, sells: 0, fees: 0, label: "ETFs" }, MutualFund: { pl: 0, buys: 0, sells: 0, fees: 0, label: "OPCVM" } };
   bpRows.forEach(r => {
@@ -212,6 +238,48 @@ function processXLSX(workbook, filterCompte = "ALL") {
   const netResult = dividends + interest + Object.values(positions).reduce((s, p) => s + (p.plNet ?? p.realized), 0) - totalFees;
   const perfPct = netDeposits > 0 ? (netResult / netDeposits) * 100 : 0;
 
+  // ── CAGR : annualisation du TWR officiel Saxo ──────────────────────────
+  let cagr = 0;
+  if (firstPerf && lastPerf && firstPerf.date !== lastPerf.date) {
+    const d1 = parseDateStr(firstPerf.date);
+    const d2 = parseDateStr(lastPerf.date);
+    const nbJours = (d2 - d1) / (1000 * 60 * 60 * 24);
+    if (nbJours > 0 && twr > -100) {
+      cagr = (Math.pow(1 + twr / 100, 365 / nbJours) - 1) * 100;
+    }
+  }
+
+  // ── IRR (XIRR) : TRI pondéré par les dates ────────────────────────────
+  // Ajouter la valeur finale comme dernier cashflow positif (récupération)
+  let irr = null;
+  if (cashflows.length > 0 && valeurTotale > 0) {
+    const irrFlows = [
+      ...cashflows,
+      { date: lastPerf ? parseDateStr(lastPerf.date) : new Date(), amount: valeurTotale },
+    ];
+    const xirr = (flows) => {
+      const msPerYear = 365.25 * 24 * 3600 * 1000;
+      const t0 = flows[0].date.getTime();
+      const npv = (rate) => flows.reduce((s, f) => {
+        const t = (f.date.getTime() - t0) / msPerYear;
+        return s + f.amount / Math.pow(1 + rate, t);
+      }, 0);
+      // Newton-Raphson
+      let r = 0.1;
+      for (let i = 0; i < 100; i++) {
+        const f = npv(r);
+        const dr = 1e-6;
+        const fp = (npv(r + dr) - f) / dr;
+        if (Math.abs(fp) < 1e-12) break;
+        const nr = r - f / fp;
+        if (Math.abs(nr - r) < 1e-8) { r = nr; break; }
+        r = Math.max(-0.999, Math.min(10, nr));
+      }
+      return Math.abs(npv(r)) < 1000 ? r * 100 : null;
+    };
+    irr = xirr(irrFlows);
+  }
+
   const sortedMonths = Object.values(months).sort((a, b) => {
     const [am, ay] = a.month.split("/");
     const [bm, by] = b.month.split("/");
@@ -235,7 +303,7 @@ function processXLSX(workbook, filterCompte = "ALL") {
 
   return {
     broker,
-    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur },
+    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur, cagr, irr },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
     months: sortedMonths,
     quarters: sortPeriod(Object.values(quarters), true),
@@ -608,10 +676,22 @@ function buildYearStats(year, data) {
     month: m.month,
   }));
 
+  // CAGR annuel (pour 1 an = TWR, pour partiel = annualisé)
+  let cagrYear = 0;
+  if (yearSeries.length >= 2) {
+    const d1 = parseDateStr(yearSeries[0].date);
+    const d2 = parseDateStr(yearSeries[yearSeries.length-1].date);
+    const nbJ = (d2 - d1) / (1000*60*60*24);
+    if (nbJ > 0) cagrYear = (Math.pow(1 + twrAnnuel/100, 365/nbJ) - 1) * 100;
+  } else {
+    cagrYear = twrAnnuel;
+  }
+
   return {
     year,
     ...yData,
     twrAnnuel,
+    cagrYear,
     volatility,
     sharpe,
     maxDrawdown,
@@ -724,7 +804,7 @@ function AnnualView({ data }) {
       {statsA && (
         <>
           {/* KPIs principaux */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <StatBlock label="TWR" valueA={statsA.twrAnnuel} valueB={statsB?.twrAnnuel} format="pct"
               tooltip="Time-Weighted Return annuel : variation du TWR cumulé entre le 1er et dernier jour de l’annee. Mesure la performance pure indépendamment des flux." />
             <StatBlock label="P&L Réalisé" valueA={statsA.pl} valueB={statsB?.pl}
@@ -994,6 +1074,8 @@ export default function PortfolioAnalyzer() {
                   <KpiCard label="Capital Net Investi" value={fmtEur(data.kpis.netDeposits)} icon="💶" color="indigo" tooltip="Dépôts cumulés moins les retraits. Représente le capital réellement engagé depuis l’ouverture du compte." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} sub={fmtPct(data.kpis.perfPct)} icon="📈" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé + dividendes + intérêts – frais totaux. Le % est calculé sur le capital net investi." />
                   <KpiCard label="TWR Officiel" value={fmtPct(data.kpis.twr)} icon="🎯" color={data.kpis.twr >= 0 ? "teal" : "red"} tooltip="Time-Weighted Return : mesure la performance pure des investissements indépendamment des entrées/sorties de capital. Chiffre officiel Saxo." />
+                  <KpiCard label="CAGR (annualisé)" value={fmtPct(data.kpis.cagr)} icon="📐" color={data.kpis.cagr >= 0 ? "teal" : "red"} tooltip="Compound Annual Growth Rate : TWR annualisé sur la durée réelle. Formule : (1 + TWR)^(365/nbJours) - 1. Permet de comparer des périodes de durées différentes." />
+                  <KpiCard label="IRR / TRI" value={data.kpis.irr != null ? fmtPct(data.kpis.irr) : "N/A"} icon="💹" color={data.kpis.irr != null && data.kpis.irr >= 0 ? "green" : "red"} tooltip="Internal Rate of Return (Taux de Rendement Interne) : rendement réel du capital investi tenant compte des dates exactes de chaque dépôt/retrait. Métrique clé en gestion patrimoniale." />
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <KpiCard label="Dépôts" value={fmtEur(data.kpis.deposits)} icon="⬆️" color="indigo" tooltip="Total des virements entrants (Cash Amount positifs) sur la période analysée." />
