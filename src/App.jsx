@@ -314,6 +314,29 @@ function InfoTooltip({ text }) {
   );
 }
 
+
+function KpiCardSm({ label, value, color = "indigo", icon, tooltip }) {
+  const colors = {
+    indigo: "from-indigo-500/20 to-indigo-900/10 border-indigo-500/30",
+    pink:   "from-pink-500/20 to-pink-900/10 border-pink-500/30",
+    teal:   "from-teal-500/20 to-teal-900/10 border-teal-500/30",
+    amber:  "from-amber-500/20 to-amber-900/10 border-amber-500/30",
+    green:  "from-green-500/20 to-green-900/10 border-green-500/30",
+    red:    "from-red-500/20 to-red-900/10 border-red-500/30",
+    violet: "from-violet-500/20 to-violet-900/10 border-violet-500/30",
+  };
+  return (
+    <div className={`bg-gradient-to-br ${colors[color] || colors.indigo} border rounded-xl p-3`}>
+      <div className="flex items-center gap-1.5 mb-1">
+        {icon && <span className="text-sm">{icon}</span>}
+        <span className="text-xs font-semibold uppercase tracking-wider text-white/50 truncate">{label}</span>
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </div>
+      <div className="text-base font-bold text-white truncate">{value}</div>
+    </div>
+  );
+}
+
 // ─── PDF builder ──────────────────────────────────────────────────────────────
 
 function buildPDF(data, filterLabel) {
