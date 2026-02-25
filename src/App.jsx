@@ -1137,6 +1137,7 @@ export default function SaxoAnalyzer() {
                         <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Achats</th>
                         <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Ventes</th>
                         <th className="text-right text-indigo-300 py-3 px-4 font-semibold">P&L Net</th>
+                        <th className="text-right text-indigo-300 py-3 px-4 font-semibold">P&L %</th>
                         <th className="text-right text-indigo-300 py-3 px-4 font-semibold">Trades</th>
                       </tr>
                     </thead>
@@ -1150,6 +1151,7 @@ export default function SaxoAnalyzer() {
                             <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.buys)}</td>
                             <td className="py-2.5 px-4 text-right text-white">{fmtEur(p.sells)}</td>
                             <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur2(pl)}</td>
+                            <td className={`py-2.5 px-4 text-right font-semibold ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{p.buys > 0 ? fmtPct(pl / p.buys * 100) : "—"}</td>
                             <td className="py-2.5 px-4 text-right text-indigo-300">{p.trades}</td>
                           </tr>
                         );
