@@ -1,232 +1,184 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// UBS Portfolio Analyzer — v1.1
-// Charte UBS : rouge #EC0000 / blanc / noir
+// UBS Portfolio Analyzer — v2.0
+// Multi-fichiers, multi-dates : snapshots mensuels → courbe de performance
+// Charte UBS : rouge #EC0000 / fond noir / blanc
 // ═══════════════════════════════════════════════════════════════════════════
 import React, { useState, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
-  LineChart, BarChart, PieChart, ComposedChart,
+  LineChart, BarChart, AreaChart, PieChart,
   Line, Bar, Area, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 
-// ─── Palette UBS ──────────────────────────────────────────────────────────
-// #EC0000 = UBS Red officiel
-// #1A0000 = rouge très sombre (background)
-// #2D0000 = rouge sombre (cards)
-// #FFFFFF = blanc pur (texte principal)
+// ─── Constantes ───────────────────────────────────────────────────────────
+const UBS_RED   = "#EC0000";
+const BG        = "#080808";
+const CARD_BG   = "#0D0D0D";
 
-// ─── Helpers date universels ──────────────────────────────────────────────
-const parseSaxoDate = (d) => {
-  if (!d) return null;
-  if (typeof d === "number") {
-    const date = XLSX.SSF.parse_date_code(d);
-    if (date) return new Date(date.y, date.m - 1, date.d);
-  }
-  const s = String(d).trim().replace(/\//g, "-");
-  const p = s.split("-");
-  if (p.length !== 3) return null;
-  const iso = p[0].length === 4
-    ? `${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`
-    : `${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;
-  const dt = new Date(iso);
-  return isNaN(dt.getTime()) ? null : dt;
+const CLASSE_COLORS = {
+  "Gestion libre":               "#EC0000",
+  "Fonds €":                     "#3B82F6",
+  "Obligations":                 "#10B981",
+  "Gestion dédiée":              "#F59E0B",
+  "Hedge funds & private markets":"#8B5CF6",
+  "Actions":                     "#F97316",
+  "Liquidités":                  "#6B7280",
+  "Liquidites":                  "#6B7280",
+};
+const CLASSE_ORDER = ["Gestion libre","Fonds €","Obligations","Gestion dédiée","Hedge funds & private markets","Actions","Liquidités"];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+const fmtEur  = (v, dec=0) => v == null ? "—" : Number(v).toLocaleString("fr-FR",{style:"currency",currency:"EUR",maximumFractionDigits:dec});
+const fmtPct  = (v) => v == null ? "—" : `${v>=0?"+":""}${Number(v).toFixed(2)} %`;
+const fmtNum  = (v) => v == null ? "—" : Number(v).toLocaleString("fr-FR",{maximumFractionDigits:2});
+
+const parseNum = (v) => {
+  if (v == null || v === "") return 0;
+  const n = parseFloat(String(v).replace(/[\s']/g,"").replace(",","."));
+  return isNaN(n) ? 0 : n;
 };
 
-const toYMD = (d) => {
-  if (!d) return "";
-  if (typeof d === "number") {
-    const date = XLSX.SSF.parse_date_code(d);
-    if (date) return `${date.y}${String(date.m).padStart(2,"0")}${String(date.d).padStart(2,"0")}`;
-  }
-  const s = String(d).trim().replace(/\//g, "-");
-  const p = s.split("-");
-  if (p.length !== 3) return "";
-  if (p[0].length === 4) return p[0] + p[1].padStart(2,"0") + p[2].padStart(2,"0");
-  return p[2] + p[1].padStart(2,"0") + p[0].padStart(2,"0");
+// Extraire date YYYYMMDD depuis nom de fichier
+const extractDateFromName = (name) => {
+  const m = name.match(/(\d{8})/);
+  return m ? m[1] : null;
 };
 
-const monthKey  = (d) => { const y = toYMD(d); return y ? `${y.slice(4,6)}/${y.slice(0,4)}` : "??"; };
-const yearKey   = (d) => { const y = toYMD(d); return y ? y.slice(0,4) : "??"; };
-const quarterKey= (d) => { const y = toYMD(d); if (!y) return "??"; return `Q${Math.ceil(Number(y.slice(4,6))/3)} ${y.slice(0,4)}`; };
-
-// ─── Formatters ───────────────────────────────────────────────────────────
-const fmtEur  = (v) => (v == null ? "—" : Number(v).toLocaleString("fr-FR", { style:"currency", currency:"EUR", maximumFractionDigits:0 }));
-const fmtChf  = (v) => (v == null ? "—" : Number(v).toLocaleString("fr-CH", { style:"currency", currency:"CHF", maximumFractionDigits:0 }));
-const fmtPct  = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(2)} %`);
-const parseNum= (v) => { if (v == null || v === "") return 0; return parseFloat(String(v).replace(/[\s']/g,"").replace(",",".")) || 0; };
-
-// ─── Détection de format UBS ──────────────────────────────────────────────
-const detectUBSFormat = (workbook) => {
-  const sheets = workbook.SheetNames.map(n => n.toLowerCase());
-  if (sheets.some(s => s.includes("transaction")) && sheets.some(s => s.includes("position"))) return "KEY4_EXCEL";
-  if (sheets.some(s => s.includes("portfolio") || s.includes("portefeuille"))) return "ADVISOR_EXCEL";
-  if (workbook.SheetNames.length === 1) return "SIMPLE_CSV";
-  return "UNKNOWN";
+// YYYYMMDD → "janv. 2026" et "2026-01-31"
+const ymdToLabel = (ymd) => {
+  if (!ymd || ymd.length !== 8) return ymd;
+  const d = new Date(`${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`);
+  return d.toLocaleDateString("fr-FR",{month:"short",year:"numeric"});
 };
+const ymdToISO = (ymd) => ymd ? `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}` : "";
 
-const findCol = (row, candidates) => {
-  const keys = Object.keys(row || {});
-  for (const c of candidates) {
-    const found = keys.find(k => k.trim().toLowerCase() === c.toLowerCase());
-    if (found) return found;
-  }
-  for (const c of candidates) {
-    const found = keys.find(k => k.toLowerCase().includes(c.toLowerCase()));
-    if (found) return found;
-  }
-  return null;
-};
+// ─── Parser XLS via SheetJS ───────────────────────────────────────────────
+const parsePositionsXLS = (buffer, filename) => {
+  const wb = XLSX.read(buffer, { type:"array" });
+  const dateStr = extractDateFromName(filename);
+  const positions = [];
 
-const UBS_COLS = {
-  date:     ["Date", "Date de valeur", "Booking date", "Date comptable", "Datum"],
-  desc:     ["Description", "Libellé", "Text", "Bezeichnung"],
-  amount:   ["Montant", "Amount", "Betrag", "CHF", "EUR", "Montant en CHF"],
-  currency: ["Devise", "Currency", "Währung"],
-  type:     ["Type", "Category", "Catégorie", "Typ"],
-  symbol:   ["Titre", "Security", "ISIN", "Valeur", "Wertpapier"],
-  account:  ["Compte", "Account", "Konto", "Numéro de compte"],
-};
-
-// ─── Processeur UBS ───────────────────────────────────────────────────────
-const processUBS = (workbook, filterCompte = "ALL", dateStart = null, dateEnd = null) => {
-  const format = detectUBSFormat(workbook);
-  const findSheet = (pred) => {
-    const name = workbook.SheetNames.find(n => pred(String(n).toLowerCase()));
-    return name ? workbook.Sheets[name] : null;
-  };
-  const toRows = (sheet) => sheet ? XLSX.utils.sheet_to_json(sheet, { defval: null }) : [];
-  const ymdStart = dateStart ? dateStart.replace(/-/g,"") : null;
-  const ymdEnd   = dateEnd   ? dateEnd.replace(/-/g,"")   : null;
-  const inRange  = (d) => {
-    const ymd = toYMD(d);
-    if (!ymd) return false;
-    if (ymdStart && ymd < ymdStart) return false;
-    if (ymdEnd   && ymd > ymdEnd)   return false;
-    return true;
-  };
-
-  const sheetTxn = format === "SIMPLE_CSV"
-    ? workbook.Sheets[workbook.SheetNames[0]]
-    : findSheet(n => n.includes("transaction") || n.includes("mouvement") || n.includes("opérat"));
-  const sheetPos = findSheet(n => n.includes("position") || n.includes("portefeuille") || n.includes("portfolio"));
-
-  const allTxns = toRows(sheetTxn);
-  if (!allTxns.length) return buildEmptyResult(format, workbook.SheetNames);
-
-  const sampleRow = allTxns.find(r => Object.values(r).some(v => v != null)) || allTxns[0];
-  const COL = {
-    date:    findCol(sampleRow, UBS_COLS.date)    || "Date",
-    desc:    findCol(sampleRow, UBS_COLS.desc)    || "Description",
-    amount:  findCol(sampleRow, UBS_COLS.amount)  || "Montant",
-    currency:findCol(sampleRow, UBS_COLS.currency)|| "Devise",
-    type:    findCol(sampleRow, UBS_COLS.type)    || "Type",
-    symbol:  findCol(sampleRow, UBS_COLS.symbol)  || "Titre",
-    account: findCol(sampleRow, UBS_COLS.account) || "Compte",
-  };
-
-  const comptes = [...new Set(allTxns.map(r => r[COL.account]).filter(Boolean))].sort();
-
-  const txns = allTxns.filter(r => {
-    if (!r[COL.date]) return false;
-    if (!inRange(r[COL.date])) return false;
-    if (filterCompte !== "ALL" && r[COL.account] !== filterCompte) return false;
-    return true;
-  });
-
-  let deposits = 0, withdrawals = 0, dividends = 0, interest = 0;
-  let fees = { commission: 0, tax: 0, other: 0 };
-  let rebates = { commission: 0 };
-  const positions = {};
-  const months = {}, quarters = {}, years = {};
-
-  const ensurePeriod = (mk, qk, yk) => {
-    if (!months[mk])   months[mk]   = { period:mk, deposits:0, withdrawals:0, pl:0, fees:0, dividends:0 };
-    if (!quarters[qk]) quarters[qk] = { period:qk, deposits:0, pl:0, fees:0, dividends:0 };
-    if (!years[yk])    years[yk]    = { period:yk, deposits:0, pl:0, fees:0, dividends:0 };
-  };
-
-  txns.forEach(row => {
-    const date = row[COL.date];
-    const amt  = parseNum(row[COL.amount]);
-    const desc = String(row[COL.desc] || row[COL.type] || "").trim();
-    const sym  = String(row[COL.symbol] || "").trim();
-    const mk = monthKey(date), qk = quarterKey(date), yk = yearKey(date);
-    ensurePeriod(mk, qk, yk);
-    const d = desc.toLowerCase();
-
-    if (d.includes("virement") || d.includes("dépôt") || d.includes("versement") || d.includes("credit transfer") || d.includes("wire") || d.includes("einzahlung") || d.includes("gutschrift")) {
-      if (amt > 0) { deposits += amt; months[mk].deposits += amt; years[yk].deposits += amt; }
-      else { withdrawals += Math.abs(amt); months[mk].withdrawals += Math.abs(amt); }
-    } else if (d.includes("dividende") || d.includes("dividend") || d.includes("coupon")) {
-      dividends += amt; months[mk].dividends += amt; years[yk].dividends += amt;
-    } else if (d.includes("intérêt") || d.includes("interest") || d.includes("zins")) {
-      interest += amt;
-    } else if (d.includes("commission") || d.includes("courtage") || d.includes("brokerage") || d.includes("frais de gest") || (d.includes("frais") && !d.includes("timbr"))) {
-      if (amt < 0) { fees.commission += Math.abs(amt); months[mk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt); }
-      else { rebates.commission += amt; }
-    } else if (d.includes("taxe") || d.includes("impôt") || d.includes("tax") || d.includes("timbr") || d.includes("droit de timbre")) {
-      fees.tax += Math.abs(amt); months[mk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
-    } else if (sym || d.includes("achat") || d.includes("vente") || d.includes("buy") || d.includes("sell")) {
-      const key = sym || desc.slice(0,20);
-      if (!positions[key]) positions[key] = { sym: key, name: desc, buys:0, sells:0, dividends:0, trades:0 };
-      positions[key].trades++;
-      if (amt < 0) positions[key].buys += Math.abs(amt);
-      else positions[key].sells += amt;
-      positions[key].realized = positions[key].sells - positions[key].buys;
-      months[mk].pl += amt; years[yk].pl += amt;
+  for (const sheetName of wb.SheetNames) {
+    const sh = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sh, { header:1, defval:"" });
+    
+    // Trouver la ligne header
+    let headerIdx = -1;
+    for (let r = 0; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === "Quantité") { headerIdx = r; break; }
     }
-  });
+    if (headerIdx === -1) continue;
 
-  const totalFees = fees.commission + fees.tax + fees.other - (rebates.commission || 0);
-  const netResult = dividends + interest + Object.values(positions).reduce((s,p) => s + (p.realized ?? 0), 0) - totalFees;
-  const netDeposits = deposits - withdrawals;
+    // Parser chaque ligne de données
+    for (let r = headerIdx + 1; r < rows.length; r++) {
+      const row = rows[r];
+      const montantEur = parseNum(row[8]);
+      if (!montantEur || montantEur <= 0) continue;
+      if (!row[2] || String(row[2]).trim() === "") continue; // Pas d'ISIN = ligne vide
 
-  let valeurTotale = 0;
-  const posRows = toRows(sheetPos);
-  if (posRows.length > 0) {
-    const sp = posRows[0];
-    const valCol = findCol(sp, ["Valeur", "Value", "Valorisation", "Market value", "Montant", "Wert", "Cours actuel"]);
-    if (valCol) valeurTotale = posRows.reduce((s, r) => s + parseNum(r[valCol]), 0);
+      positions.push({
+        date: dateStr,
+        classe: sheetName,
+        qte: parseNum(row[0]),
+        nom: String(row[1] || "").trim(),
+        isin: String(row[2] || "").trim(),
+        devise: String(row[3] || "").trim(),
+        pxAchat: parseNum(row[4]),
+        pxMarche: parseNum(row[5]),
+        dateVal: String(row[6] || "").trim(),
+        montantDevise: parseNum(row[7]),
+        montantEur,
+        plEur: parseNum(row[10]),
+        plDevise: parseNum(row[11]),
+        plPct: parseNum(row[12]),
+        poids: parseNum(row[13]),
+      });
+    }
   }
 
-  const allDates = allTxns.map(r => r[COL.date] ? toYMD(r[COL.date]) : "").filter(Boolean).sort();
-  const dateRange = allDates.length ? {
-    min: `${allDates[0].slice(0,4)}-${allDates[0].slice(4,6)}-${allDates[0].slice(6,8)}`,
-    max: `${allDates.at(-1).slice(0,4)}-${allDates.at(-1).slice(4,6)}-${allDates.at(-1).slice(6,8)}`,
-  } : null;
-
-  const sortPeriod = (arr, isQ) => arr.sort((a,b) => {
-    if (isQ) { const [qa,ya] = a.period.split(" "); const [qb,yb] = b.period.split(" "); return ya!==yb?Number(ya)-Number(yb):qa.localeCompare(qb); }
-    return a.period.localeCompare(b.period);
-  });
-
-  return {
-    broker:"UBS", format, colMapping: COL, sheetNames: workbook.SheetNames,
-    kpis: { deposits, withdrawals, netDeposits, dividends, interest, fees, rebates, totalFees, netResult, valeurTotale, perfPct: netDeposits > 0 ? (netResult/netDeposits)*100 : 0 },
-    positions: Object.values(positions).sort((a,b) => (b.realized??0)-(a.realized??0)),
-    months: sortPeriod(Object.values(months), false),
-    quarters: sortPeriod(Object.values(quarters), true),
-    years: sortPeriod(Object.values(years), false),
-    comptes, dateRange,
-  };
+  return { date: dateStr, filename, positions };
 };
 
-const buildEmptyResult = (format, sheetNames=[]) => ({
-  broker:"UBS", format, sheetNames,
-  kpis:{ deposits:0,withdrawals:0,netDeposits:0,dividends:0,interest:0,fees:{commission:0,tax:0,other:0},rebates:{commission:0},totalFees:0,netResult:0,valeurTotale:0,perfPct:0 },
-  positions:[], months:[], quarters:[], years:[], comptes:[], dateRange:null,
-});
+// ─── Calcul snapshots consolidés ─────────────────────────────────────────
+const buildSnapshots = (allParsed) => {
+  // Grouper par date
+  const byDate = {};
+  for (const parsed of allParsed) {
+    if (!parsed.date) continue;
+    if (!byDate[parsed.date]) byDate[parsed.date] = [];
+    byDate[parsed.date].push(...parsed.positions);
+  }
+
+  // Trier par date
+  const dates = Object.keys(byDate).sort();
+
+  const snapshots = dates.map(date => {
+    const positions = byDate[date];
+    const total = positions.reduce((s,p) => s + p.montantEur, 0);
+    const plTotal = positions.reduce((s,p) => s + (p.plEur || 0), 0);
+
+    // Par classe
+    const byClasse = {};
+    for (const p of positions) {
+      const c = p.classe;
+      if (!byClasse[c]) byClasse[c] = { montant: 0, pl: 0, positions: [] };
+      byClasse[c].montant += p.montantEur;
+      byClasse[c].pl += (p.plEur || 0);
+      byClasse[c].positions.push(p);
+    }
+
+    return { date, label: ymdToLabel(date), iso: ymdToISO(date), total, plTotal, byClasse, positions };
+  });
+
+  // Calculer performance relative (TWR approx entre snapshots)
+  for (let i = 1; i < snapshots.length; i++) {
+    const prev = snapshots[i-1].total;
+    const curr = snapshots[i].total;
+    snapshots[i].perfMois = prev > 0 ? ((curr - prev) / prev) * 100 : 0;
+    snapshots[i].variation = curr - prev;
+  }
+  if (snapshots.length > 0) {
+    snapshots[0].perfMois = 0;
+    snapshots[0].variation = 0;
+  }
+
+  // TWR cumulé depuis le premier snapshot
+  if (snapshots.length > 0) {
+    const base = snapshots[0].total;
+    for (const s of snapshots) {
+      s.perfCumulee = base > 0 ? ((s.total - base) / base) * 100 : 0;
+    }
+  }
+
+  return snapshots;
+};
+
+// ─── Données graphique timeline ───────────────────────────────────────────
+const buildChartData = (snapshots) => {
+  return snapshots.map(s => {
+    const point = {
+      date: s.label,
+      total: Math.round(s.total),
+      pl: Math.round(s.plTotal),
+      perf: s.perfMois ? parseFloat(s.perfMois.toFixed(2)) : 0,
+      perfCum: s.perfCumulee ? parseFloat(s.perfCumulee.toFixed(2)) : 0,
+    };
+    for (const [c, d] of Object.entries(s.byClasse)) {
+      point[c] = Math.round(d.montant);
+    }
+    return point;
+  });
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
-// COMPOSANTS UI — Charte UBS (rouge #EC0000 / fond sombre / blanc)
+// COMPOSANTS UI
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Logo UBS stylisé (3 touches = marque UBS)
-function UBSLogo({ size = 32 }) {
+function UBSLogo({ size=32 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
-      <rect width="32" height="32" rx="4" fill="#EC0000"/>
+      <rect width="32" height="32" rx="4" fill={UBS_RED}/>
       <rect x="6"  y="10" width="4" height="12" fill="white"/>
       <rect x="14" y="10" width="4" height="12" fill="white"/>
       <rect x="22" y="10" width="4" height="12" fill="white"/>
@@ -234,297 +186,413 @@ function UBSLogo({ size = 32 }) {
   );
 }
 
-// KPI Card — style UBS : bord gauche rouge, fond très sombre
-function KpiCard({ label, value, sub, icon, positive, negative, tooltip }) {
+function KpiCard({ label, value, sub, positive, negative, tooltip }) {
   const [show, setShow] = useState(false);
   const ref = useRef(null);
-  const borderColor = positive ? "#10b981" : negative ? "#EC0000" : "#EC0000";
+  const borderColor = positive ? "#10b981" : negative ? UBS_RED : "#333";
   return (
-    <div className="relative" style={{ background:"#0D0D0D", border:"1px solid #222", borderLeft:`3px solid ${borderColor}`, borderRadius:8, padding:"14px 16px" }}>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div style={{ color:"#888", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>
-            {label}
-          </div>
-          <div style={{ color: positive ? "#10b981" : negative ? "#EC0000" : "white", fontSize:20, fontWeight:700, lineHeight:1.2 }}>
-            {value}
-          </div>
-          {sub && <div style={{ color:"#555", fontSize:11, marginTop:4 }}>{sub}</div>}
-        </div>
-        {icon && <span style={{ fontSize:20, opacity:0.6 }}>{icon}</span>}
-      </div>
-      {tooltip && (
-        <button ref={ref} onClick={() => setShow(s=>!s)}
-          style={{ position:"absolute", top:8, right:8, color:"#555", fontSize:11, background:"none", border:"none", cursor:"pointer" }}>ⓘ</button>
-      )}
+    <div className="relative" style={{ background:CARD_BG, border:"1px solid #1A1A1A", borderLeft:`3px solid ${borderColor}`, borderRadius:8, padding:"14px 16px" }}>
+      <div style={{ color:"#666", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>{label}</div>
+      <div style={{ color: positive?"#10b981": negative?UBS_RED:"white", fontSize:20, fontWeight:700 }}>{value}</div>
+      {sub && <div style={{ color:"#444", fontSize:11, marginTop:3 }}>{sub}</div>}
+      {tooltip && <button ref={ref} onClick={()=>setShow(s=>!s)} style={{ position:"absolute",top:8,right:8,color:"#444",fontSize:11,background:"none",border:"none",cursor:"pointer" }}>ⓘ</button>}
       {show && (
-        <div style={{ position:"fixed", top:(ref.current?.getBoundingClientRect().bottom||0)+6, left:Math.min(ref.current?.getBoundingClientRect().left||0, window.innerWidth-280), zIndex:9999, width:260, background:"#1A1A1A", border:"1px solid #333", borderRadius:8, padding:12, fontSize:12, color:"#ccc", lineHeight:1.5 }}>
+        <div style={{ position:"fixed",top:(ref.current?.getBoundingClientRect().bottom||0)+6,left:ref.current?.getBoundingClientRect().left||0,zIndex:9999,width:240,background:"#1A1A1A",border:"1px solid #333",borderRadius:8,padding:12,fontSize:12,color:"#ccc",lineHeight:1.5 }}>
           {tooltip}
-          <button onClick={()=>setShow(false)} style={{ position:"absolute", top:6, right:8, background:"none", border:"none", color:"#666", cursor:"pointer", fontSize:12 }}>✕</button>
+          <button onClick={()=>setShow(false)} style={{ position:"absolute",top:6,right:8,background:"none",border:"none",color:"#666",cursor:"pointer" }}>✕</button>
         </div>
       )}
     </div>
   );
 }
 
-// Section card
-function Section({ title, children, action }) {
+function Section({ title, children, noPad }) {
   return (
-    <div style={{ background:"#0D0D0D", border:"1px solid #222", borderRadius:12, overflow:"hidden", marginBottom:16 }}>
-      <div style={{ padding:"12px 20px", borderBottom:"1px solid #1A1A1A", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <span style={{ color:"#888", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>{title}</span>
-        {action}
+    <div style={{ background:CARD_BG, border:"1px solid #1A1A1A", borderRadius:12, overflow:"hidden", marginBottom:12 }}>
+      <div style={{ padding:"10px 18px", borderBottom:"1px solid #161616" }}>
+        <span style={{ color:"#555", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.1em" }}>{title}</span>
       </div>
-      <div style={{ padding:20 }}>{children}</div>
+      <div style={noPad ? {} : { padding:18 }}>{children}</div>
     </div>
   );
 }
+
+// ─── Custom Tooltip pour Recharts ─────────────────────────────────────────
+const CustomTooltip = ({ active, payload, label, formatter }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background:"#111",border:"1px solid #222",borderRadius:8,padding:"10px 14px",fontSize:12,color:"white",minWidth:160 }}>
+      <div style={{ color:"#888",marginBottom:6,fontWeight:700 }}>{label}</div>
+      {payload.map((p,i) => (
+        <div key={i} style={{ display:"flex",justifyContent:"space-between",gap:16,color:p.color,marginBottom:2 }}>
+          <span style={{ color:"#888",fontSize:11 }}>{p.name}</span>
+          <span style={{ fontWeight:700 }}>{formatter ? formatter(p.value) : p.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 // ─── Vue d'ensemble ───────────────────────────────────────────────────────
-function OverviewTab({ data }) {
-  const { kpis } = data;
-  const pl = kpis.netResult;
+function OverviewTab({ snapshots }) {
+  const last = snapshots[snapshots.length - 1];
+  const first = snapshots[0];
+  const prev = snapshots.length > 1 ? snapshots[snapshots.length - 2] : null;
+  const chartData = buildChartData(snapshots);
+  const classes = [...new Set(snapshots.flatMap(s => Object.keys(s.byClasse)))].sort((a,b) => {
+    const oa = CLASSE_ORDER.indexOf(a), ob = CLASSE_ORDER.indexOf(b);
+    return (oa===-1?99:oa) - (ob===-1?99:ob);
+  });
+
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-
-      {/* KPIs principaux */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))", gap:10 }}>
-        <KpiCard label="Valeur Portefeuille" value={fmtEur(kpis.valeurTotale)} icon="💼" tooltip="Valorisation totale selon la feuille Positions (si disponible)." />
-        <KpiCard label="Capital Net Investi" value={fmtEur(kpis.netDeposits)} icon="💰" tooltip="Dépôts moins retraits." />
-        <KpiCard label="Résultat Net" value={fmtEur(pl)} icon={pl>=0?"📈":"📉"} positive={pl>0} negative={pl<0} tooltip="Dividendes + Intérêts + P&L réalisé − Frais nets." />
-        <KpiCard label="ROI Simple" value={fmtPct(kpis.perfPct)} positive={kpis.perfPct>0} negative={kpis.perfPct<0} tooltip="Résultat Net / Capital Net Investi. Indicateur non pondéré par le temps." />
+    <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+      {/* KPIs snapshot le plus récent */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10 }}>
+        <KpiCard label="Valorisation totale" value={fmtEur(last.total)} sub={last.label} tooltip="Somme de toutes les positions au dernier snapshot disponible." />
+        <KpiCard label="P&L latent" value={fmtEur(last.plTotal)} positive={last.plTotal>0} negative={last.plTotal<0} tooltip="Plus ou moins-values latentes sur les positions avec prix d'achat connu." />
+        {prev && <KpiCard label="Variation 1 mois" value={fmtEur(last.variation)} sub={fmtPct(last.perfMois)} positive={last.variation>0} negative={last.variation<0} />}
+        {first && snapshots.length > 1 && <KpiCard label={`Perf. depuis ${first.label}`} value={fmtPct(last.perfCumulee)} positive={last.perfCumulee>0} negative={last.perfCumulee<0} tooltip="Performance cumulée depuis le premier snapshot chargé. Approximation — ne tient pas compte des flux de trésorerie." />}
+        <KpiCard label="Positions" value={last.positions.length} sub={`${snapshots.length} snapshot${snapshots.length>1?"s":""} chargé${snapshots.length>1?"s":""}`} />
       </div>
 
-      {/* Flux */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))", gap:10 }}>
-        <KpiCard label="Dépôts" value={fmtEur(kpis.deposits)} icon="⬇️" />
-        <KpiCard label="Retraits" value={fmtEur(kpis.withdrawals)} icon="⬆️" />
-        <KpiCard label="Dividendes" value={fmtEur(kpis.dividends)} icon="🏅" positive={kpis.dividends>0} />
-        <KpiCard label="Intérêts" value={fmtEur(kpis.interest)} icon="💹" positive={kpis.interest>0} />
-        <KpiCard label="Commissions" value={"-"+fmtEur(kpis.fees.commission)} icon="🏦" negative />
-        <KpiCard label="Taxes" value={"-"+fmtEur(kpis.fees.tax)} icon="🏛️" negative />
-        <KpiCard label="Frais Nets" value={"-"+fmtEur(kpis.totalFees)} icon="💸" negative tooltip="Commissions + Taxes − Remboursements de commissions." />
-        {kpis.rebates?.commission > 0 && <KpiCard label="Crédits comm." value={"+"+fmtEur(kpis.rebates.commission)} icon="↩️" positive tooltip="Remboursements de commissions reçus — déjà déduits des Frais Nets." />}
-      </div>
+      {/* Courbe valorisation totale */}
+      {snapshots.length > 1 && (
+        <Section title="Valorisation totale dans le temps">
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={chartData} margin={{ left:10,right:10 }}>
+              <defs>
+                <linearGradient id="gradTotal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={UBS_RED} stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor={UBS_RED} stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#161616" />
+              <XAxis dataKey="date" tick={{ fill:"#555",fontSize:10 }} />
+              <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v => `${(v/1e6).toFixed(1)}M€`} width={60} />
+              <Tooltip content={<CustomTooltip formatter={v => fmtEur(v)} />} />
+              <Area type="monotone" dataKey="total" name="Total" stroke={UBS_RED} strokeWidth={2} fill="url(#gradTotal)" dot={{ r:3,fill:UBS_RED }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Section>
+      )}
 
-      {/* Graphique P&L par année */}
-      {data.years.length > 0 && (
-        <Section title="P&L par année">
+      {/* Répartition par classe — empilement */}
+      {snapshots.length > 1 && (
+        <Section title="Répartition par classe d'actif">
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data.years} margin={{ left:10, right:10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1A1A1A" />
-              <XAxis dataKey="period" tick={{ fill:"#666", fontSize:11 }} />
-              <YAxis tick={{ fill:"#666", fontSize:11 }} tickFormatter={v => fmtEur(v)} width={90} />
-              <Tooltip formatter={v => fmtEur(v)} contentStyle={{ background:"#111", border:"1px solid #333", borderRadius:8, color:"#fff", fontSize:12 }} />
-              <Bar dataKey="pl" name="P&L" radius={[3,3,0,0]}>
-                {data.years.map((e,i) => <Cell key={i} fill={e.pl>=0?"#EC0000":"#666"} />)}
-              </Bar>
+            <BarChart data={chartData} margin={{ left:10,right:10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#161616" />
+              <XAxis dataKey="date" tick={{ fill:"#555",fontSize:10 }} />
+              <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v => `${(v/1e6).toFixed(1)}M€`} width={60} />
+              <Tooltip content={<CustomTooltip formatter={v => fmtEur(v)} />} />
+              <Legend wrapperStyle={{ fontSize:10,color:"#666" }} />
+              {classes.map(c => (
+                <Bar key={c} dataKey={c} stackId="a" fill={CLASSE_COLORS[c]||"#666"} name={c} />
+              ))}
             </BarChart>
           </ResponsiveContainer>
         </Section>
       )}
 
-      {/* Infos fichier */}
-      <Section title="Fichier chargé">
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(160px,1fr))", gap:12 }}>
-          {[
-            { label:"Broker", val: data.broker },
-            { label:"Format détecté", val: data.format },
-            { label:"Période", val: data.dateRange ? `${data.dateRange.min} → ${data.dateRange.max}` : "—" },
-            { label:"Feuilles", val: (data.sheetNames||[]).join(", ") || "—" },
-          ].map(({label,val}) => (
-            <div key={label}>
-              <div style={{ color:"#555", fontSize:10, textTransform:"uppercase", fontWeight:700, marginBottom:4 }}>{label}</div>
-              <div style={{ color:"#ccc", fontSize:12, fontFamily:"monospace" }}>{val}</div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      {/* Mapping colonnes */}
-      {data.colMapping && (
-        <div style={{ background:"#120800", border:"1px solid #EC000044", borderRadius:12, padding:16 }}>
-          <div style={{ color:"#EC0000", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:10 }}>
-            ⚠️ Mapping colonnes détecté — à vérifier
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px,1fr))", gap:8 }}>
-            {Object.entries(data.colMapping).map(([k,v]) => (
-              <div key={k} style={{ fontFamily:"monospace", fontSize:11 }}>
-                <span style={{ color:"#666" }}>{k}: </span>
-                <span style={{ color: v ? "#EC0000" : "#444" }}>{v || "non trouvé"}</span>
+      {/* Répartition du dernier snapshot — Pie */}
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+        <Section title={`Répartition au ${last.label}`}>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={Object.entries(last.byClasse).map(([c,d]) => ({ name:c, value:Math.round(d.montant) }))}
+                cx="50%" cy="50%" innerRadius={55} outerRadius={85} dataKey="value" nameKey="name">
+                {Object.entries(last.byClasse).map(([c],i) => (
+                  <Cell key={i} fill={CLASSE_COLORS[c]||"#666"} />
+                ))}
+              </Pie>
+              <Tooltip formatter={v => fmtEur(v)} contentStyle={{ background:"#111",border:"1px solid #222",borderRadius:8,fontSize:11 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          {/* Légende */}
+          <div style={{ marginTop:8 }}>
+            {Object.entries(last.byClasse).sort((a,b)=>b[1].montant-a[1].montant).map(([c,d]) => (
+              <div key={c} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <div style={{ width:8,height:8,borderRadius:"50%",background:CLASSE_COLORS[c]||"#666",flexShrink:0 }}/>
+                  <span style={{ color:"#888",fontSize:11 }}>{c}</span>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <span style={{ color:"white",fontSize:11,fontWeight:700 }}>{fmtEur(d.montant)}</span>
+                  <span style={{ color:"#555",fontSize:10,marginLeft:6 }}>{((d.montant/last.total)*100).toFixed(1)}%</span>
+                </div>
               </div>
             ))}
           </div>
-          <div style={{ color:"#666", fontSize:11, marginTop:8 }}>Si des colonnes sont incorrectes, uploadez un vrai export UBS pour recalibrer.</div>
-        </div>
-      )}
+        </Section>
+
+        {/* P&L latent par classe */}
+        <Section title="P&L latent par classe">
+          {Object.entries(last.byClasse)
+            .filter(([,d]) => d.pl !== 0)
+            .sort((a,b) => b[1].pl - a[1].pl)
+            .map(([c,d]) => (
+            <div key={c} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:6,flex:1 }}>
+                <div style={{ width:6,height:6,borderRadius:"50%",background:CLASSE_COLORS[c]||"#666",flexShrink:0 }}/>
+                <span style={{ color:"#888",fontSize:11 }}>{c}</span>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <span style={{ color:d.pl>=0?"#10b981":UBS_RED,fontSize:12,fontWeight:700 }}>{fmtEur(d.pl)}</span>
+                {d.montant > 0 && <span style={{ color:"#444",fontSize:10,marginLeft:6 }}>{fmtPct((d.pl/d.montant)*100)}</span>}
+              </div>
+            </div>
+          ))}
+          {Object.values(last.byClasse).every(d => d.pl === 0) && (
+            <div style={{ color:"#444",fontSize:12,textAlign:"center",padding:"20px 0" }}>
+              P&L non disponible (prix d'achat à 0 dans le fichier)
+            </div>
+          )}
+        </Section>
+      </div>
     </div>
   );
 }
 
-// ─── Positions ────────────────────────────────────────────────────────────
-function PositionsTab({ data }) {
-  const [sortKey, setSortKey] = useState("realized");
+// ─── Vue Positions ────────────────────────────────────────────────────────
+function PositionsTab({ snapshots }) {
+  const last = snapshots[snapshots.length - 1];
+  const [sortKey, setSortKey] = useState("montantEur");
   const [sortDir, setSortDir] = useState("desc");
-  const positions = [...data.positions].sort((a,b) => {
-    const va = a[sortKey]??0, vb = b[sortKey]??0;
-    return sortDir==="desc" ? vb-va : va-vb;
-  });
-  const th = (label, col) => (
-    <th onClick={() => { if (sortKey===col) setSortDir(d=>d==="desc"?"asc":"desc"); else {setSortKey(col);setSortDir("desc");} }}
-      style={{ padding:"10px 14px", textAlign:"right", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em",
-        color: sortKey===col ? "#EC0000" : "#555", cursor:"pointer", whiteSpace:"nowrap", userSelect:"none" }}>
-      {label} {sortKey===col ? (sortDir==="desc"?"↓":"↑") : "↕"}
+  const [filterClasse, setFilterClasse] = useState("ALL");
+  const classes = [...new Set(last.positions.map(p => p.classe))].sort();
+
+  const positions = [...last.positions]
+    .filter(p => filterClasse === "ALL" || p.classe === filterClasse)
+    .sort((a,b) => {
+      const va = a[sortKey]??0, vb = b[sortKey]??0;
+      return sortDir==="desc" ? vb-va : va-vb;
+    });
+
+  const total = positions.reduce((s,p) => s+p.montantEur, 0);
+  const totalPl = positions.reduce((s,p) => s+(p.plEur||0), 0);
+
+  const SortTh = ({ label, col, left }) => (
+    <th onClick={() => { if(sortKey===col)setSortDir(d=>d==="desc"?"asc":"desc"); else{setSortKey(col);setSortDir("desc");} }}
+      style={{ padding:"9px 12px",textAlign:left?"left":"right",fontSize:10,fontWeight:700,textTransform:"uppercase",
+        letterSpacing:"0.07em",cursor:"pointer",userSelect:"none",whiteSpace:"nowrap",
+        color:sortKey===col?UBS_RED:"#555" }}>
+      {label} {sortKey===col?(sortDir==="desc"?"↓":"↑"):<span style={{color:"#333"}}>↕</span>}
     </th>
   );
-  if (!positions.length) return <div style={{ textAlign:"center", color:"#555", padding:60 }}>Aucune position détectée dans le fichier.</div>;
+
   return (
-    <Section title={`${positions.length} positions`}>
-      <div style={{ overflowX:"auto" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+    <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+      {/* Filtres */}
+      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+        <button onClick={()=>setFilterClasse("ALL")} style={{ padding:"5px 14px",borderRadius:5,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,background:filterClasse==="ALL"?UBS_RED:"#1A1A1A",color:filterClasse==="ALL"?"white":"#666" }}>Tout</button>
+        {classes.map(c => (
+          <button key={c} onClick={()=>setFilterClasse(c)} style={{ padding:"5px 14px",borderRadius:5,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,background:filterClasse===c?(CLASSE_COLORS[c]||UBS_RED):"#1A1A1A",color:filterClasse===c?"white":"#666" }}>{c}</button>
+        ))}
+      </div>
+
+      <Section title={`${positions.length} positions — ${last.label}`} noPad>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+            <thead>
+              <tr style={{ borderBottom:"1px solid #1A1A1A",background:"#0A0A0A" }}>
+                <SortTh label="Nom" col="nom" left />
+                <SortTh label="Classe" col="classe" left />
+                <SortTh label="ISIN" col="isin" left />
+                <SortTh label="Devise" col="devise" />
+                <SortTh label="Px achat" col="pxAchat" />
+                <SortTh label="Px marché" col="pxMarche" />
+                <SortTh label="Montant EUR" col="montantEur" />
+                <SortTh label="P&L EUR" col="plEur" />
+                <SortTh label="P&L %" col="plPct" />
+                <SortTh label="Poids %" col="poids" />
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((p,i) => (
+                <tr key={i} style={{ borderBottom:"1px solid #0F0F0F" }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#0F0F0F"}
+                  onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <td style={{ padding:"9px 12px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                    <span style={{ color:"white",fontWeight:600,fontSize:11 }}>{p.nom}</span>
+                  </td>
+                  <td style={{ padding:"9px 12px",whiteSpace:"nowrap" }}>
+                    <span style={{ fontSize:10,padding:"2px 6px",borderRadius:3,background:(CLASSE_COLORS[p.classe]||"#666")+"22",color:CLASSE_COLORS[p.classe]||"#666",fontWeight:700 }}>{p.classe}</span>
+                  </td>
+                  <td style={{ padding:"9px 12px",fontFamily:"monospace",fontSize:10,color:"#555" }}>{p.isin}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",color:"#666",fontSize:11 }}>{p.devise}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",color:"#555",fontSize:11 }}>{p.pxAchat ? fmtNum(p.pxAchat) : "—"}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",color:"#888",fontSize:11 }}>{fmtNum(p.pxMarche)}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",color:"white",fontWeight:700,fontSize:12 }}>{fmtEur(p.montantEur)}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",fontWeight:700,color:p.plEur>0?"#10b981":p.plEur<0?UBS_RED:"#444" }}>{p.plEur ? fmtEur(p.plEur) : "—"}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",color:p.plPct>0?"#10b981":p.plPct<0?UBS_RED:"#444",fontSize:11 }}>{p.plPct ? fmtPct(p.plPct) : "—"}</td>
+                  <td style={{ padding:"9px 12px",textAlign:"right",color:"#555",fontSize:11 }}>{p.poids ? `${parseFloat(p.poids).toFixed(1)}%` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop:"1px solid #333",background:"#0A0A0A" }}>
+                <td colSpan={6} style={{ padding:"9px 12px",color:"#555",fontSize:11,fontWeight:700 }}>TOTAL ({positions.length})</td>
+                <td style={{ padding:"9px 12px",textAlign:"right",color:"white",fontWeight:700 }}>{fmtEur(total)}</td>
+                <td style={{ padding:"9px 12px",textAlign:"right",fontWeight:700,color:totalPl>0?"#10b981":totalPl<0?UBS_RED:"#444" }}>{totalPl ? fmtEur(totalPl) : "—"}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+// ─── Vue Performance ──────────────────────────────────────────────────────
+function PerformanceTab({ snapshots }) {
+  if (snapshots.length < 2) return (
+    <div style={{ textAlign:"center",color:"#555",padding:80,fontSize:14 }}>
+      Chargez au moins 2 snapshots pour voir la performance dans le temps.
+    </div>
+  );
+
+  const chartData = buildChartData(snapshots);
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+      {/* Performance mensuelle */}
+      <Section title="Variation mensuelle (€)">
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={chartData.slice(1)} margin={{ left:10,right:10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#161616" />
+            <XAxis dataKey="date" tick={{ fill:"#555",fontSize:10 }} />
+            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v => `${v>=0?"+":""}${(v/1000).toFixed(0)}k€`} width={70} />
+            <Tooltip content={<CustomTooltip formatter={v => fmtEur(v)} />} />
+            <Bar dataKey="total" name="Variation" radius={[3,3,0,0]}>
+              {chartData.slice(1).map((e,i) => <Cell key={i} fill={e.perf>=0?UBS_RED:"#444"} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </Section>
+
+      {/* Performance % cumulée */}
+      <Section title="Performance cumulée (%)">
+        <ResponsiveContainer width="100%" height={180}>
+          <LineChart data={chartData} margin={{ left:10,right:10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#161616" />
+            <XAxis dataKey="date" tick={{ fill:"#555",fontSize:10 }} />
+            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v => `${v>=0?"+":""}${v.toFixed(1)}%`} width={55} />
+            <Tooltip content={<CustomTooltip formatter={v => fmtPct(v)} />} />
+            <Line type="monotone" dataKey="perfCum" name="Perf. cumulée" stroke={UBS_RED} strokeWidth={2} dot={{ r:3,fill:UBS_RED }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </Section>
+
+      {/* Tableau des snapshots */}
+      <Section title="Tableau récapitulatif" noPad>
+        <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
           <thead>
-            <tr style={{ borderBottom:"1px solid #1A1A1A" }}>
-              <th style={{ padding:"10px 14px", textAlign:"left", fontSize:10, fontWeight:700, textTransform:"uppercase", color:"#555", letterSpacing:"0.08em" }}>Titre</th>
-              {th("Achats","buys")} {th("Ventes","sells")} {th("P&L Réalisé","realized")} {th("Dividendes","dividends")} {th("Trades","trades")}
+            <tr style={{ borderBottom:"1px solid #1A1A1A",background:"#0A0A0A" }}>
+              {["Date","Valorisation","Variation €","Variation %","P&L Latent","Perf. cumulée"].map((h,i) => (
+                <th key={h} style={{ padding:"9px 14px",textAlign:i===0?"left":"right",fontSize:10,fontWeight:700,textTransform:"uppercase",color:"#555",letterSpacing:"0.07em" }}>{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {positions.map((p,i) => (
-              <tr key={i} style={{ borderBottom:"1px solid #111" }} onMouseEnter={e=>e.currentTarget.style.background="#111"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                <td style={{ padding:"10px 14px" }}>
-                  <div style={{ color:"white", fontWeight:600, fontSize:12 }}>{p.sym}</div>
-                  <div style={{ color:"#555", fontSize:11, maxWidth:240, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
-                </td>
-                <td style={{ padding:"10px 14px", textAlign:"right", color:"#888" }}>{fmtEur(p.buys)}</td>
-                <td style={{ padding:"10px 14px", textAlign:"right", color:"#888" }}>{fmtEur(p.sells)}</td>
-                <td style={{ padding:"10px 14px", textAlign:"right", fontWeight:700, color:(p.realized??0)>=0?"#EC0000":"#888" }}>{fmtEur(p.realized)}</td>
-                <td style={{ padding:"10px 14px", textAlign:"right", color:"#10b981" }}>{fmtEur(p.dividends)}</td>
-                <td style={{ padding:"10px 14px", textAlign:"right", color:"#555" }}>{p.trades}</td>
+            {[...snapshots].reverse().map((s,i) => (
+              <tr key={i} style={{ borderBottom:"1px solid #0F0F0F" }}
+                onMouseEnter={e=>e.currentTarget.style.background="#0F0F0F"}
+                onMouseLeave={e=>e.currentTarget.style.background=""}>
+                <td style={{ padding:"9px 14px",color:"white",fontWeight:600 }}>{s.label}</td>
+                <td style={{ padding:"9px 14px",textAlign:"right",color:"white",fontWeight:700 }}>{fmtEur(s.total)}</td>
+                <td style={{ padding:"9px 14px",textAlign:"right",color:s.variation>0?"#10b981":s.variation<0?UBS_RED:"#555",fontWeight:600 }}>{s.variation ? fmtEur(s.variation) : "—"}</td>
+                <td style={{ padding:"9px 14px",textAlign:"right",color:s.perfMois>0?"#10b981":s.perfMois<0?UBS_RED:"#555" }}>{s.perfMois ? fmtPct(s.perfMois) : "—"}</td>
+                <td style={{ padding:"9px 14px",textAlign:"right",color:s.plTotal>0?"#10b981":s.plTotal<0?UBS_RED:"#444" }}>{fmtEur(s.plTotal)}</td>
+                <td style={{ padding:"9px 14px",textAlign:"right",color:s.perfCumulee>0?"#10b981":s.perfCumulee<0?UBS_RED:"#555",fontWeight:600 }}>{s.perfCumulee !== undefined ? fmtPct(s.perfCumulee) : "—"}</td>
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr style={{ borderTop:"1px solid #333" }}>
-              <td style={{ padding:"10px 14px", color:"#666", fontSize:11, fontWeight:700 }}>TOTAL</td>
-              <td style={{ padding:"10px 14px", textAlign:"right", color:"#888" }}>{fmtEur(positions.reduce((s,p)=>s+p.buys,0))}</td>
-              <td style={{ padding:"10px 14px", textAlign:"right", color:"#888" }}>{fmtEur(positions.reduce((s,p)=>s+p.sells,0))}</td>
-              <td style={{ padding:"10px 14px", textAlign:"right", fontWeight:700, color:"#EC0000" }}>{fmtEur(positions.reduce((s,p)=>s+(p.realized??0),0))}</td>
-              <td style={{ padding:"10px 14px", textAlign:"right", color:"#10b981" }}>{fmtEur(positions.reduce((s,p)=>s+(p.dividends||0),0))}</td>
-              <td style={{ padding:"10px 14px", textAlign:"right", color:"#555" }}>{positions.reduce((s,p)=>s+p.trades,0)}</td>
-            </tr>
-          </tfoot>
         </table>
-      </div>
-    </Section>
-  );
-}
-
-// ─── Périodes ─────────────────────────────────────────────────────────────
-function PeriodesTab({ data }) {
-  const [view, setView] = useState("years");
-  const rows = view==="years" ? data.years : view==="quarters" ? data.quarters : data.months;
-  const maxPl = Math.max(...rows.map(r => Math.abs(r.pl||0)), 1);
-  return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <div style={{ display:"flex", gap:6 }}>
-        {["years","quarters","months"].map(v => (
-          <button key={v} onClick={() => setView(v)} style={{
-            padding:"7px 18px", borderRadius:6, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, transition:"all .2s",
-            background: view===v ? "#EC0000" : "#1A1A1A", color: view===v ? "white" : "#666" }}>
-            {v==="years"?"Années":v==="quarters"?"Trimestres":"Mois"}
-          </button>
-        ))}
-      </div>
-      {!rows.length ? (
-        <div style={{ textAlign:"center", color:"#555", padding:60 }}>Aucune donnée.</div>
-      ) : (
-        <Section title={`${rows.length} périodes`}>
-          {/* Graphique barres */}
-          <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={rows} margin={{ left:10, right:10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1A1A1A" />
-              <XAxis dataKey="period" tick={{ fill:"#555", fontSize:10 }} />
-              <YAxis tick={{ fill:"#555", fontSize:10 }} tickFormatter={v => fmtEur(v)} width={80} />
-              <Tooltip formatter={v => fmtEur(v)} contentStyle={{ background:"#111", border:"1px solid #333", borderRadius:8, color:"#fff", fontSize:11 }} />
-              <Bar dataKey="pl" name="P&L" radius={[2,2,0,0]}>
-                {rows.map((e,i) => <Cell key={i} fill={e.pl>=0?"#EC0000":"#444"} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          {/* Tableau */}
-          <div style={{ overflowX:"auto", marginTop:12 }}>
-            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-              <thead>
-                <tr style={{ borderBottom:"1px solid #1A1A1A" }}>
-                  {["Période","Dépôts","P&L","Dividendes","Frais"].map((h,i) => (
-                    <th key={h} style={{ padding:"8px 14px", textAlign: i===0?"left":"right", fontSize:10, fontWeight:700, textTransform:"uppercase", color:"#555", letterSpacing:"0.08em" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r,i) => (
-                  <tr key={i} style={{ borderBottom:"1px solid #111" }} onMouseEnter={e=>e.currentTarget.style.background="#111"} onMouseLeave={e=>e.currentTarget.style.background=""}>
-                    <td style={{ padding:"8px 14px", color:"white", fontWeight:600, fontFamily:"monospace", fontSize:12 }}>{r.period}</td>
-                    <td style={{ padding:"8px 14px", textAlign:"right", color:"#888" }}>{fmtEur(r.deposits)}</td>
-                    <td style={{ padding:"8px 14px", textAlign:"right", fontWeight:700, color:(r.pl||0)>=0?"#EC0000":"#888" }}>{fmtEur(r.pl)}</td>
-                    <td style={{ padding:"8px 14px", textAlign:"right", color:"#10b981" }}>{fmtEur(r.dividends)}</td>
-                    <td style={{ padding:"8px 14px", textAlign:"right", color:"#666" }}>{fmtEur(r.fees)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Section>
-      )}
+      </Section>
     </div>
   );
 }
 
-// ─── Config ───────────────────────────────────────────────────────────────
-function ConfigTab({ data }) {
-  const formats = [
-    { id:"KEY4_EXCEL",    label:"UBS Key4 / E-banking",    desc:"Feuilles Transactions + Positions. Colonnes : Date, Description, Montant, Devise, Type, Titre, Compte.", done:true },
-    { id:"SIMPLE_CSV",   label:"CSV Transactions simple",  desc:"Mono-feuille avec historique des transactions UBS.", done:true },
-    { id:"ADVISOR_EXCEL",label:"UBS Conseiller / Advisor", desc:"Format export conseiller avec feuilles Portfolio/Cash/Movements.", done:false },
-  ];
-  return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <Section title="Formats supportés">
-        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-          {formats.map(f => (
-            <div key={f.id} style={{ display:"flex", gap:12, padding:12, borderRadius:8, border:`1px solid ${f.id===data.format?"#EC000066":f.done?"#222":"#1A1A1A"}`, background: f.id===data.format?"#1A0000":"transparent" }}>
-              <span style={{ fontSize:16 }}>{f.id===data.format?"🔴":f.done?"⬜":"🔜"}</span>
-              <div>
-                <div style={{ color: f.id===data.format?"#EC0000":"#ccc", fontWeight:700, fontSize:12 }}>
-                  {f.label} <span style={{ color:"#444", fontFamily:"monospace", fontSize:10, fontWeight:400 }}>({f.id})</span>
-                  {f.id===data.format && <span style={{ marginLeft:8, color:"#EC0000", fontSize:10 }}>← ACTIF</span>}
-                </div>
-                <div style={{ color:"#555", fontSize:11, marginTop:3 }}>{f.desc}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
+// ─── Vue Évolution positions ──────────────────────────────────────────────
+function EvolutionTab({ snapshots }) {
+  if (snapshots.length < 2) return (
+    <div style={{ textAlign:"center",color:"#555",padding:80,fontSize:14 }}>
+      Chargez au moins 2 snapshots pour voir l'évolution des positions.
+    </div>
+  );
 
-      {data.format === "UNKNOWN" && (
-        <div style={{ background:"#120000", border:"1px solid #EC000044", borderRadius:12, padding:16 }}>
-          <div style={{ color:"#EC0000", fontSize:12, fontWeight:700, marginBottom:10 }}>Format non reconnu — Feuilles détectées :</div>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-            {(data.sheetNames||[]).map(n => (
-              <span key={n} style={{ background:"#1A1A1A", border:"1px solid #333", borderRadius:4, padding:"3px 8px", fontFamily:"monospace", fontSize:11, color:"#ccc" }}>{n}</span>
-            ))}
-          </div>
-          <div style={{ color:"#666", fontSize:11, marginTop:8 }}>Transmettez ces noms pour qu'un adapter spécifique soit ajouté.</div>
-        </div>
+  // Trouver les ISINs présents dans plusieurs snapshots
+  const isinMap = {};
+  for (const s of snapshots) {
+    for (const p of s.positions) {
+      if (!isinMap[p.isin]) isinMap[p.isin] = { nom:p.nom, isin:p.isin, classe:p.classe, series:[] };
+      isinMap[p.isin].series.push({ date:s.label, montantEur:p.montantEur, plEur:p.plEur, plPct:p.plPct, pxMarche:p.pxMarche });
+    }
+  }
+
+  // Trier par montant dernier snapshot
+  const lastISINs = Object.values(isinMap)
+    .map(d => ({ ...d, lastVal: d.series[d.series.length-1]?.montantEur || 0 }))
+    .sort((a,b) => b.lastVal - a.lastVal);
+
+  const [selected, setSelected] = useState(null);
+  const sel = selected ? isinMap[selected] : null;
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+      {/* Graphique ligne pour la position sélectionnée */}
+      {sel && (
+        <Section title={`Évolution — ${sel.nom}`}>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={sel.series} margin={{ left:10,right:10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#161616" />
+              <XAxis dataKey="date" tick={{ fill:"#555",fontSize:10 }} />
+              <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v => fmtEur(v)} width={90} />
+              <Tooltip content={<CustomTooltip formatter={v => fmtEur(v)} />} />
+              <Line type="monotone" dataKey="montantEur" name="Valorisation" stroke={CLASSE_COLORS[sel.classe]||UBS_RED} strokeWidth={2} dot={{ r:3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Section>
       )}
 
-      <Section title="Comment ajouter un format">
-        <div style={{ color:"#666", fontSize:12, lineHeight:1.7 }}>
-          <p style={{ marginBottom:6 }}>1. Uploader le fichier UBS → le format est auto-détecté.</p>
-          <p style={{ marginBottom:6 }}>2. Si <code style={{ color:"#EC0000", background:"#1A0000", padding:"1px 6px", borderRadius:4 }}>UNKNOWN</code> → noter les noms de feuilles affichés ci-dessus.</p>
-          <p style={{ marginBottom:6 }}>3. Transmettre les noms de colonnes du mapping détecté (onglet Vue d'ensemble).</p>
-          <p>4. Un adapter est ajouté dans <code style={{ color:"#EC0000", background:"#1A0000", padding:"1px 6px", borderRadius:4 }}>parseKey4()</code> ou un nouveau bloc.</p>
-        </div>
+      {/* Liste des positions */}
+      <Section title={`${lastISINs.length} positions — Cliquer pour voir l'évolution`} noPad>
+        <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
+          <thead>
+            <tr style={{ borderBottom:"1px solid #1A1A1A",background:"#0A0A0A" }}>
+              {["Nom","ISIN","Classe","Dernier montant"].map((h,i) => (
+                <th key={h} style={{ padding:"9px 12px",textAlign:i<3?"left":"right",fontSize:10,fontWeight:700,textTransform:"uppercase",color:"#555",letterSpacing:"0.07em" }}>{h}</th>
+              ))}
+              {snapshots.map(s => (
+                <th key={s.date} style={{ padding:"9px 12px",textAlign:"right",fontSize:10,fontWeight:700,color:"#444",letterSpacing:"0.06em" }}>{s.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {lastISINs.map((d,i) => (
+              <tr key={i} style={{ borderBottom:"1px solid #0F0F0F",cursor:"pointer",background:selected===d.isin?"#1A0000":"" }}
+                onClick={() => setSelected(selected===d.isin ? null : d.isin)}
+                onMouseEnter={e=>{ if(selected!==d.isin) e.currentTarget.style.background="#0F0F0F"; }}
+                onMouseLeave={e=>{ if(selected!==d.isin) e.currentTarget.style.background=""; }}>
+                <td style={{ padding:"8px 12px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"white",fontWeight:600,fontSize:11 }}>{d.nom}</td>
+                <td style={{ padding:"8px 12px",fontFamily:"monospace",fontSize:10,color:"#444" }}>{d.isin}</td>
+                <td style={{ padding:"8px 12px" }}>
+                  <span style={{ fontSize:10,padding:"2px 5px",borderRadius:3,background:(CLASSE_COLORS[d.classe]||"#666")+"22",color:CLASSE_COLORS[d.classe]||"#666",fontWeight:700 }}>{d.classe}</span>
+                </td>
+                <td style={{ padding:"8px 12px",textAlign:"right",color:"white",fontWeight:700 }}>{fmtEur(d.lastVal)}</td>
+                {snapshots.map(s => {
+                  const pt = d.series.find(x => x.date === s.label);
+                  return (
+                    <td key={s.date} style={{ padding:"8px 12px",textAlign:"right",color:pt?"#888":"#333",fontSize:11 }}>
+                      {pt ? fmtEur(pt.montantEur) : "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Section>
     </div>
   );
@@ -534,179 +602,144 @@ function ConfigTab({ data }) {
 // APP PRINCIPALE
 // ═══════════════════════════════════════════════════════════════════════════
 const TABS = [
-  { id:"overview",  label:"Vue d'ensemble" },
-  { id:"positions", label:"Positions" },
-  { id:"periodes",  label:"Périodes" },
-  { id:"config",    label:"⚙️ Config" },
+  { id:"overview",    label:"Vue d'ensemble" },
+  { id:"positions",   label:"Positions" },
+  { id:"performance", label:"Performance" },
+  { id:"evolution",   label:"Évolution" },
 ];
 
-const BG = "#080808";
-const CARD_BG = "#0D0D0D";
-const UBS_RED = "#EC0000";
-
 export default function UBSAnalyzer() {
-  const [data, setData]       = useState(null);
+  const [allParsed, setAllParsed] = useState([]);
+  const [snapshots, setSnapshots] = useState([]);
+  const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [tab, setTab]         = useState("overview");
-  const [fileName, setFileName] = useState("");
-  const [filterCompte, setFilterCompte] = useState("ALL");
-  const [dateStart, setDateStart] = useState("");
-  const [dateEnd, setDateEnd]     = useState("");
-  const [workbook, setWorkbook]   = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const dropRef = useRef(null);
 
-  const processFile = useCallback((wb, compte, ds, de) => {
-    try {
-      const result = processUBS(wb, compte, ds || null, de || null);
-      setData(result); setError(null);
-    } catch(e) { setError("Erreur traitement : " + e.message); }
+  const addFiles = useCallback(async (files) => {
+    setLoading(true);
+    const newParsed = [];
+    for (const file of files) {
+      if (!file.name.match(/\.(xls|xlsx)$/i)) continue;
+      try {
+        const buf = await file.arrayBuffer();
+        const parsed = parsePositionsXLS(new Uint8Array(buf), file.name);
+        if (parsed.positions.length > 0) newParsed.push(parsed);
+      } catch(e) { console.warn("Erreur", file.name, e); }
+    }
+    setAllParsed(prev => {
+      const merged = [...prev, ...newParsed];
+      const snaps = buildSnapshots(merged);
+      setSnapshots(snaps);
+      return merged;
+    });
+    setLoading(false);
   }, []);
 
-  const handleFile = useCallback((file) => {
-    if (!file) return;
-    setLoading(true); setError(null); setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const wb = XLSX.read(e.target.result, { type:"array", cellDates:true });
-        setWorkbook(wb); processFile(wb, "ALL", "", "");
-      } catch(err) { setError("Erreur lecture : " + err.message); }
-      finally { setLoading(false); }
-    };
-    reader.readAsArrayBuffer(file);
-  }, [processFile]);
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); setIsDragging(false);
+    addFiles(Array.from(e.dataTransfer.files));
+  }, [addFiles]);
+
+  const reset = () => { setAllParsed([]); setSnapshots([]); setTab("overview"); };
 
   // ── Écran d'accueil ────────────────────────────────────────────────────
-  if (!data) return (
-    <div style={{ minHeight:"100vh", background:BG, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
-      {/* Header UBS */}
-      <div style={{ marginBottom:48, textAlign:"center" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:14, marginBottom:12 }}>
+  if (!snapshots.length) return (
+    <div style={{ minHeight:"100vh",background:BG,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+      <div style={{ marginBottom:48,textAlign:"center" }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:14,marginBottom:12 }}>
           <UBSLogo size={48} />
           <div style={{ textAlign:"left" }}>
-            <div style={{ fontSize:28, fontWeight:800, color:"white", letterSpacing:"-0.02em" }}>Portfolio Analyzer</div>
-            <div style={{ fontSize:13, color:"#555", marginTop:2 }}>UBS · Asset Management · Multi-format</div>
+            <div style={{ fontSize:26,fontWeight:800,color:"white",letterSpacing:"-0.02em" }}>Portfolio Analyzer</div>
+            <div style={{ fontSize:13,color:"#444",marginTop:2 }}>UBS · Snapshots mensuels · Multi-fichiers</div>
           </div>
         </div>
-        {/* Ligne rouge signature UBS */}
-        <div style={{ width:64, height:3, background:UBS_RED, margin:"0 auto" }} />
+        <div style={{ width:56,height:3,background:UBS_RED,margin:"0 auto" }} />
       </div>
 
-      {/* Zone de drop */}
       <div ref={dropRef}
-        onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFile(e.dataTransfer.files[0]); }}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        style={{
-          width:"100%", maxWidth:480, border:`2px dashed ${isDragging?UBS_RED:"#2A2A2A"}`,
-          borderRadius:12, padding:"52px 32px", textAlign:"center", cursor:"pointer",
-          background: isDragging ? "#1A0000" : "#0D0D0D",
-          transition:"all .2s"
-        }}>
-        <div style={{ fontSize:48, marginBottom:16 }}>📁</div>
-        <div style={{ fontSize:18, fontWeight:700, color:"white", marginBottom:6 }}>Glissez votre export UBS ici</div>
-        <div style={{ fontSize:13, color:"#555", marginBottom:20 }}>ou cliquez pour sélectionner</div>
-        <div style={{ fontSize:11, color:"#333", fontFamily:"monospace", marginBottom:24 }}>
-          Excel (.xlsx) · CSV (.csv)<br/>UBS Key4 · E-banking · Conseiller
+        onDrop={handleDrop}
+        onDragOver={e=>{ e.preventDefault();setIsDragging(true); }}
+        onDragLeave={()=>setIsDragging(false)}
+        style={{ width:"100%",maxWidth:520,border:`2px dashed ${isDragging?UBS_RED:"#222"}`,borderRadius:12,padding:"48px 32px",textAlign:"center",
+          background:isDragging?"#1A0000":CARD_BG,transition:"all .2s" }}>
+        <div style={{ fontSize:44,marginBottom:14 }}>📁</div>
+        <div style={{ fontSize:17,fontWeight:700,color:"white",marginBottom:6 }}>Glissez vos fichiers UBS ici</div>
+        <div style={{ fontSize:12,color:"#555",marginBottom:6 }}>Tous les mois en une fois — position principale + _1_ + _2_ + _3_</div>
+        <div style={{ fontSize:11,color:"#333",fontFamily:"monospace",marginBottom:24 }}>
+          Position_de_portefeuille20251221.xls<br/>
+          Position_de_portefeuille20260226__2_.xls<br/>
+          Synthèse_de_portefeuille…xls (optionnel)
         </div>
         <label style={{ cursor:"pointer" }}>
-          <span style={{ display:"inline-block", padding:"10px 28px", background:UBS_RED, color:"white", borderRadius:6, fontSize:13, fontWeight:700, transition:"opacity .2s" }}
+          <span style={{ display:"inline-block",padding:"10px 28px",background:UBS_RED,color:"white",borderRadius:6,fontSize:13,fontWeight:700 }}
             onMouseEnter={e=>e.currentTarget.style.opacity="0.85"} onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
-            Choisir un fichier
+            Choisir les fichiers
           </span>
-          <input type="file" accept=".xlsx,.xls,.csv" style={{ display:"none" }} onChange={e=>handleFile(e.target.files[0])} />
+          <input type="file" accept=".xlsx,.xls" multiple style={{ display:"none" }} onChange={e=>addFiles(Array.from(e.target.files))} />
         </label>
       </div>
 
-      {loading && <div style={{ marginTop:20, color:"#555", fontSize:13 }}>Analyse en cours…</div>}
-      {error && (
-        <div style={{ marginTop:16, padding:"12px 20px", background:"#1A0000", border:"1px solid #EC000044", borderRadius:8, color:UBS_RED, fontSize:13 }}>
-          ❌ {error}
-        </div>
-      )}
+      {loading && <div style={{ marginTop:20,color:"#555",fontSize:13 }}>Chargement en cours…</div>}
     </div>
   );
 
+  const last = snapshots[snapshots.length - 1];
+
   // ── App principale ─────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight:"100vh", background:BG, color:"white" }}>
-
-      {/* Header sticky */}
-      <div style={{ position:"sticky", top:0, zIndex:40, background:"#050505", borderBottom:`1px solid #1A1A1A` }}>
-
-        {/* Barre rouge UBS signature (2px) */}
-        <div style={{ height:2, background:UBS_RED }} />
-
-        {/* Header principal */}
-        <div style={{ maxWidth:1200, margin:"0 auto", padding:"10px 20px", display:"flex", flexWrap:"wrap", alignItems:"center", gap:12 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginRight:12 }}>
-            <UBSLogo size={28} />
+    <div style={{ minHeight:"100vh",background:BG,color:"white" }}>
+      <div style={{ position:"sticky",top:0,zIndex:40,background:"#050505",borderBottom:"1px solid #1A1A1A" }}>
+        <div style={{ height:2,background:UBS_RED }} />
+        <div style={{ maxWidth:1280,margin:"0 auto",padding:"10px 20px",display:"flex",flexWrap:"wrap",alignItems:"center",gap:10 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginRight:12 }}>
+            <UBSLogo size={26} />
             <div>
-              <div style={{ fontSize:13, fontWeight:800, color:"white" }}>UBS Portfolio Analyzer</div>
-              <div style={{ fontSize:10, color:"#444", fontFamily:"monospace" }}>{fileName}</div>
+              <div style={{ fontSize:13,fontWeight:800,color:"white" }}>UBS Portfolio Analyzer</div>
+              <div style={{ fontSize:10,color:"#444" }}>{snapshots.length} snapshot{snapshots.length>1?"s":""} · {last.positions.length} positions · {last.label}</div>
             </div>
           </div>
 
-          {/* Filtre compte */}
-          {data.comptes?.length > 0 && (
-            <select value={filterCompte}
-              onChange={e=>{ setFilterCompte(e.target.value); if(workbook) processFile(workbook,e.target.value,dateStart,dateEnd); }}
-              style={{ background:"#111", color:"#ccc", border:"1px solid #2A2A2A", borderRadius:6, padding:"5px 10px", fontSize:12, outline:"none" }}>
-              <option value="ALL">Tous les comptes</option>
-              {data.comptes.map(c=><option key={c} value={c}>{c}</option>)}
-            </select>
-          )}
-
-          {/* Filtre date */}
-          <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:12 }}>
-            {["dateStart","dateEnd"].map((field,i) => (
-              <input key={field} type="date" value={field==="dateStart"?dateStart:dateEnd}
-                onChange={e=>field==="dateStart"?setDateStart(e.target.value):setDateEnd(e.target.value)}
-                style={{ background:"#111", color:"#ccc", border:"1px solid #2A2A2A", borderRadius:6, padding:"5px 8px", fontSize:11, outline:"none" }} />
+          {/* Badge par date chargée */}
+          <div style={{ display:"flex",gap:4,flexWrap:"wrap" }}>
+            {snapshots.map(s => (
+              <span key={s.date} style={{ fontSize:10,padding:"2px 8px",borderRadius:4,background:"#1A0000",color:UBS_RED,border:`1px solid ${UBS_RED}33`,fontFamily:"monospace" }}>
+                {s.label}
+              </span>
             ))}
-            <button onClick={()=>{ if(workbook) processFile(workbook,filterCompte,dateStart,dateEnd); }}
-              style={{ padding:"5px 14px", background:UBS_RED, color:"white", border:"none", borderRadius:6, fontSize:12, fontWeight:700, cursor:"pointer" }}>
-              Appliquer
-            </button>
-            {(dateStart||dateEnd) && (
-              <button onClick={()=>{ setDateStart("");setDateEnd("");if(workbook)processFile(workbook,filterCompte,"",""); }}
-                style={{ background:"none", border:"none", color:"#555", cursor:"pointer", fontSize:13 }}>✕</button>
-            )}
           </div>
 
-          <button onClick={()=>{ setData(null);setWorkbook(null);setFileName("");setFilterCompte("ALL");setDateStart("");setDateEnd(""); }}
-            style={{ marginLeft:"auto", padding:"5px 12px", background:"#111", border:"1px solid #2A2A2A", color:"#666", borderRadius:6, fontSize:12, cursor:"pointer" }}>
-            ← Changer
+          {/* Ajouter des fichiers */}
+          <label style={{ marginLeft:"auto",cursor:"pointer" }}>
+            <span style={{ display:"inline-block",padding:"5px 14px",background:"#1A1A1A",border:"1px solid #333",color:"#888",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer" }}
+              onMouseEnter={e=>e.currentTarget.style.color="white"} onMouseLeave={e=>e.currentTarget.style.color="#888"}>
+              + Ajouter des fichiers
+            </span>
+            <input type="file" accept=".xlsx,.xls" multiple style={{ display:"none" }} onChange={e=>addFiles(Array.from(e.target.files))} />
+          </label>
+          <button onClick={reset} style={{ padding:"5px 12px",background:"none",border:"1px solid #1A1A1A",color:"#555",borderRadius:6,fontSize:12,cursor:"pointer" }}>
+            ✕ Réinitialiser
           </button>
         </div>
 
         {/* Onglets */}
-        <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 20px", display:"flex", gap:2, alignItems:"center" }}>
+        <div style={{ maxWidth:1280,margin:"0 auto",padding:"0 20px",display:"flex",gap:2 }}>
           {TABS.map(t => (
             <button key={t.id} onClick={()=>setTab(t.id)} style={{
-              padding:"8px 18px", border:"none", borderBottom: tab===t.id ? `2px solid ${UBS_RED}` : "2px solid transparent",
-              background:"none", color: tab===t.id ? "white" : "#555", fontWeight: tab===t.id ? 700 : 400,
-              fontSize:13, cursor:"pointer", transition:"color .2s"
-            }}>
+              padding:"8px 18px",border:"none",borderBottom:tab===t.id?`2px solid ${UBS_RED}`:"2px solid transparent",
+              background:"none",color:tab===t.id?"white":"#555",fontWeight:tab===t.id?700:400,
+              fontSize:13,cursor:"pointer",transition:"color .15s",marginBottom:-1 }}>
               {t.label}
             </button>
           ))}
-          <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6, paddingBottom:2 }}>
-            <span style={{ fontSize:10, fontFamily:"monospace", padding:"2px 8px", borderRadius:4, background: data.format==="UNKNOWN"?"#1A0000":"#0A1A0A", color: data.format==="UNKNOWN"?UBS_RED:"#10b981", border:`1px solid ${data.format==="UNKNOWN"?"#EC000044":"#10b98133"}` }}>
-              {data.format}
-            </span>
-          </div>
         </div>
       </div>
 
-      {/* Contenu */}
-      <div style={{ maxWidth:1200, margin:"0 auto", padding:"24px 20px" }}>
-        {tab==="overview"  && <OverviewTab data={data} />}
-        {tab==="positions" && <PositionsTab data={data} />}
-        {tab==="periodes"  && <PeriodesTab data={data} />}
-        {tab==="config"    && <ConfigTab data={data} />}
+      <div style={{ maxWidth:1280,margin:"0 auto",padding:"20px 20px" }}>
+        {tab==="overview"    && <OverviewTab snapshots={snapshots} />}
+        {tab==="positions"   && <PositionsTab snapshots={snapshots} />}
+        {tab==="performance" && <PerformanceTab snapshots={snapshots} />}
+        {tab==="evolution"   && <EvolutionTab snapshots={snapshots} />}
       </div>
     </div>
   );
