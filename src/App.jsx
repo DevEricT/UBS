@@ -62,7 +62,7 @@ const COMPTES_LABELS = {
 
 // ─── Processor ───────────────────────────────────────────────────────────────
 
-function processXLSX(workbook, filterCompte = "ALL") {
+function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd = null) {
   // ── Détection automatique du broker par signature de fichier ──
   const sheetNames = workbook.SheetNames;
   const isSaxo = sheetNames.includes("Montants cumulés") && sheetNames.includes("B P");
@@ -76,8 +76,24 @@ function processXLSX(workbook, filterCompte = "ALL") {
 
   const toRows = (sheet) => sheet ? XLSX.utils.sheet_to_json(sheet, { defval: null }) : [];
 
+  // Convertir DD-MM-YYYY en comparable YYYYMMDD
+  const toYMD = (d) => {
+    const p = String(d).split("-");
+    return p.length === 3 ? p[2]+p[1]+p[0] : "";
+  };
+  const ymdStart = dateStart ? dateStart.replace(/-/g, "") : null;
+  const ymdEnd   = dateEnd   ? dateEnd.replace(/-/g, "")   : null;
+  const inRange  = (d) => {
+    const ymd = toYMD(d);
+    if (!ymd) return false;
+    if (ymdStart && ymd < ymdStart) return false;
+    if (ymdEnd   && ymd > ymdEnd)   return false;
+    return true;
+  };
+
   const mainRows = toRows(sheetMain).filter(r => {
     if (!r["Date"]) return false;
+    if (!inRange(r["Date"])) return false;
     if (filterCompte === "ALL") return true;
     return r["ID du compte de comptabilisation"] === filterCompte;
   });
@@ -178,12 +194,14 @@ function processXLSX(workbook, filterCompte = "ALL") {
   // P&L net depuis onglet B/P
   const bpRows = toRows(sheetBP).filter(r => {
     if (!r["Date"]) return false;
+    if (!inRange(r["Date"])) return false;
     if (filterCompte === "ALL") return true;
     return r["ID du compte de comptabilisation"] === filterCompte;
   });
   // Mouvements d'espèces : Cash Amount uniquement = dépôts/retraits réels
   const mvtRows = toRows(sheetMvt).filter(r => {
     if (!r["Date"]) return false;
+    if (!inRange(r["Date"])) return false;
     if (filterCompte !== "ALL" && r["ID du compte de comptabilisation"] !== filterCompte) return false;
     return String(r["Nom du type de montant"]).trim() === "Cash Amount";
   });
@@ -304,6 +322,14 @@ function processXLSX(workbook, filterCompte = "ALL") {
 
   return {
     broker,
+    dateRange: (() => {
+      const allDates = toRows(sheetMain)
+        .map(r => r["Date"] ? toYMD(r["Date"]) : "")
+        .filter(Boolean).sort();
+      if (!allDates.length) return null;
+      const toISO = (ymd) => `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
+      return { min: toISO(allDates[0]), max: toISO(allDates[allDates.length-1]) };
+    })(),
     kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur, cagr, irr },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
     months: sortedMonths,
@@ -1212,6 +1238,8 @@ export default function PortfolioAnalyzer() {
   const [tab, setTab]           = useState("overview");
   const [error, setError]       = useState(null);
   const [filterCompte, setFilterCompte] = useState("ALL");
+  const [dateStart, setDateStart]       = useState("");
+  const [dateEnd,   setDateEnd]         = useState("");
   const [fileName, setFileName] = useState("");
 
   const handleFile = useCallback((file) => {
@@ -1222,8 +1250,14 @@ export default function PortfolioAnalyzer() {
       try {
         const wb = XLSX.read(e.target.result, { type: "array" });
         setWorkbook(wb);
-        setData(processXLSX(wb, "ALL"));
+        const processed = processXLSX(wb, "ALL");
+        setData(processed);
         setFilterCompte("ALL");
+        // Initialiser les bornes de date depuis le fichier
+        if (processed.dateRange) {
+          setDateStart(processed.dateRange.min);
+          setDateEnd(processed.dateRange.max);
+        }
       } catch (err) {
         setError("Erreur lecture : " + err.message);
       }
@@ -1234,7 +1268,10 @@ export default function PortfolioAnalyzer() {
 
   const handleFilterChange = (compte) => {
     setFilterCompte(compte);
-    if (workbook) setData(processXLSX(workbook, compte));
+    if (workbook) setData(processXLSX(workbook, compte, dateStart || null, dateEnd || null));
+  };
+  const handleDateFilter = (ds, de) => {
+    if (workbook) setData(processXLSX(workbook, filterCompte, ds || null, de || null));
   };
 
   const exportPDF = () => {
@@ -1285,9 +1322,42 @@ export default function PortfolioAnalyzer() {
               <select value={filterCompte} onChange={(e) => handleFilterChange(e.target.value)}
                 style={{ background: "#1e1b4b", color: "white" }}
                 className="px-3 py-2 rounded-xl text-sm text-white border border-white/20 focus:outline-none focus:border-indigo-400">
-                <option style={{ background: "#1e1b4b" }} value="ALL" style={{ background: "#1e1b4b" }}>Tous les comptes</option>
+                <option style={{ background: "#1e1b4b" }} value="ALL">Tous les comptes</option>
                 {data.comptes.map((c) => <option style={{ background: "#1e1b4b" }} key={c} value={c}>{COMPTES_LABELS[c] || c}</option>)}
               </select>
+
+              {/* ── Filtre période ── */}
+              <div className="flex items-center gap-1.5 bg-white/5 border border-white/15 rounded-xl px-3 py-1.5">
+                <span className="text-white/40 text-xs">📅</span>
+                <input
+                  type="date"
+                  value={dateStart}
+                  onChange={e => { setDateStart(e.target.value); handleDateFilter(e.target.value, dateEnd); }}
+                  style={{ background: "transparent", colorScheme: "dark" }}
+                  className="text-white text-xs border-none outline-none w-28"
+                />
+                <span className="text-white/30 text-xs">→</span>
+                <input
+                  type="date"
+                  value={dateEnd}
+                  onChange={e => { setDateEnd(e.target.value); handleDateFilter(dateStart, e.target.value); }}
+                  style={{ background: "transparent", colorScheme: "dark" }}
+                  className="text-white text-xs border-none outline-none w-28"
+                />
+                {(dateStart !== (data.dateRange?.min || "") || dateEnd !== (data.dateRange?.max || "")) && (
+                  <button
+                    onClick={() => {
+                      const min = data.dateRange?.min || "";
+                      const max = data.dateRange?.max || "";
+                      setDateStart(min); setDateEnd(max);
+                      handleDateFilter(min, max);
+                    }}
+                    className="text-indigo-400 text-xs hover:text-white transition-colors ml-1"
+                    title="Réinitialiser la période"
+                  >✕</button>
+                )}
+              </div>
+
               <button onClick={exportCSV} className="px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/20 hover:bg-white/10 transition-all">⬇️ CSV</button>
               <button onClick={exportPDF} className="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg">📄 PDF</button>
               <button onClick={() => { setData(null); setWorkbook(null); setFileName(""); }} className="px-3 py-2 rounded-xl text-xs text-white/40 hover:text-white/70 hover:bg-white/5 transition-all">🔄</button>
