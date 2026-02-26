@@ -1992,6 +1992,10 @@ export default function PortfolioAnalyzer() {
                 </div>
               </div>
             )}
+            {/* Notes */}
+            {tab === "notes" && (
+              <NotesView data={data} dateStart={dateStart} dateEnd={dateEnd} dateRange={data.dateRange} />
+            )}
           </>
         )}
       </div>
