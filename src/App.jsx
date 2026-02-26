@@ -514,6 +514,7 @@ const TABS = [
   { id: "positions",   label: "💼 Positions" },
   { id: "trends",      label: "📅 Trends" },
   { id: "fees",        label: "💰 Frais" },
+  { id: "notes",       label: "📖 Notes" },
 ];
 
 
@@ -770,6 +771,135 @@ function TemporelleView({ data }) {
           </table>
         </div>
       )}
+
+    </div>
+  );
+}
+
+
+// ─── Composant NotesView ─────────────────────────────────────────────────────
+
+function NotesView({ data, dateStart, dateEnd, dateRange }) {
+  const isPeriodFiltered = dateStart !== (dateRange?.min || "") || dateEnd !== (dateRange?.max || "");
+
+  const Section = ({ title, children }) => (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
+      <h3 className="text-white font-semibold text-sm uppercase tracking-widest border-b border-white/10 pb-3">{title}</h3>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+
+  const Def = ({ term, color = "indigo", children }) => (
+    <div className="flex gap-3">
+      <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full h-fit mt-0.5 bg-${color}-500/20 text-${color}-300 border border-${color}-500/30 min-w-fit`}>{term}</span>
+      <p className="text-white/60 text-sm leading-relaxed">{children}</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+
+      {/* ── Filtre actif ── */}
+      {isPeriodFiltered && (
+        <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5">
+          <span className="text-amber-400 text-lg shrink-0">⚠️</span>
+          <div>
+            <div className="text-amber-300 font-semibold text-sm mb-1">Filtre de période actif : {dateStart} → {dateEnd}</div>
+            <p className="text-amber-300/70 text-sm leading-relaxed">
+              Tous les onglets sont recalculés sur cette sous-période. Les montants (P&L, frais, dividendes) reflètent uniquement les transactions de la période sélectionnée.
+            </p>
+            <p className="text-amber-300/70 text-sm leading-relaxed mt-2">
+              <strong className="text-amber-300">Note TWR :</strong> le TWR affiché est la variation du TWR cumulé Saxo entre le premier et le dernier point de la période. Il peut différer du TWR que Saxo calculerait pour la même période isolée, car Saxo recalcule depuis zéro en tenant compte des flux internes à la période.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Métriques de performance ── */}
+      <Section title="📈 Métriques de Performance">
+        <Def term="TWR" color="teal">
+          <strong>Time-Weighted Return</strong> — Rendement pondéré dans le temps. Élimine l'effet des dépôts et retraits pour mesurer uniquement la performance de la gestion. C'est le standard CFA/GIPS utilisé par les gérants de fonds. Le chiffre affiché provient directement de l'onglet «Performance» du fichier {data.broker}.
+        </Def>
+        <Def term="CAGR" color="teal">
+          <strong>Compound Annual Growth Rate</strong> — TWR annualisé sur la durée réelle du portefeuille. Formule : (1 + TWR)^(365/nbJours) - 1. Permet de comparer des portefeuilles sur des durées différentes et de se référencer à un indice annuel. Exemple : un TWR de +9,22% sur 14 mois donne un CAGR d'environ +7,8%/an.
+        </Def>
+        <Def term="IRR / TRI" color="green">
+          <strong>Internal Rate of Return / Taux de Rendement Interne</strong> — Rendement réel du capital investi, tenant compte des dates exactes de chaque dépôt et retrait (XIRR). C'est la métrique patrimoniale par excellence : si tu avais placé tout le capital dès le premier jour, quel rendement annuel équivalent aurais-tu obtenu ? Calculé par Newton-Raphson sur les flux de l'onglet «Mouvements d'espèces».
+        </Def>
+        <Def term="MWR" color="green">
+          <strong>Money-Weighted Return</strong> — Synonyme de l'IRR dans le contexte d'un portefeuille personnel. Contrairement au TWR, il est sensible aux dépôts/retraits : si tu déposes beaucoup juste avant une hausse, ton MWR sera meilleur que ton TWR.
+        </Def>
+        <Def term="Perf %" color="indigo">
+          Rendement simple calculé dans l'app : Résultat Net / Capital Net Investi. Différent du TWR car il ne pondère pas dans le temps — il indique combien le capital a rapporté en proportion, sans tenir compte des dates des flux.
+        </Def>
+      </Section>
+
+      {/* ── Métriques de risque ── */}
+      <Section title="⚡ Métriques de Risque">
+        <Def term="Volatilité" color="amber">
+          Écart-type des rendements journaliers annualisé (× √252). Mesure l'amplitude des fluctuations quotidiennes. Interprétation : &lt;10% = faible (obligations), 10-20% = modérée (actions diversifiées), &gt;20% = élevée (titres concentrés). Source : colonne «% daily returns» de l'onglet Performance.
+        </Def>
+        <Def term="Sharpe" color="amber">
+          (TWR annuel − taux sans risque 3%) / Volatilité. Mesure la rémunération du risque pris. &gt;1 = excellent (chaque unité de risque est bien payée), 0-1 = acceptable, &lt;0 = le portefeuille sous-performe le taux sans risque après ajustement du risque.
+        </Def>
+        <Def term="Drawdown" color="red">
+          Perte maximale depuis un sommet de valorisation (peak-to-trough). Le drawdown max indique la pire perte subie si on avait acheté au plus haut et vendu au plus bas. Calculé sur la série TWR journalière. Un drawdown qui se prolonge indique une difficulté à récupérer les pertes.
+        </Def>
+        <Def term="Hit ratio" color="indigo">
+          Proportion de jours de bourse avec un rendement positif. Un hit ratio &gt;55% avec un ratio gain/perte &gt;1 est caractéristique d'une gestion efficace. Visible dans l'onglet Analyse Temporelle.
+        </Def>
+      </Section>
+
+      {/* ── Frais et fiscalité ── */}
+      <Section title="💰 Frais & Fiscalité">
+        <Def term="Commission" color="amber">
+          Frais de courtage prélevés par {data.broker} sur chaque ordre exécuté. Apparaît dans la colonne «Nom du type de montant» du fichier.
+        </Def>
+        <Def term="FFT" color="amber">
+          <strong>French Financial Transaction Tax</strong> — Taxe sur les Transactions Financières française prélevée uniquement à l'achat sur les actions françaises dont la capitalisation dépasse 1 milliard d'euros. Taux légal : 0,3% du montant de la transaction.
+        </Def>
+        <Def term="Exchange Fee" color="amber">
+          Frais de bourse facturés par les marchés non-EUR (NYSE, NASDAQ). Dans le fichier, identifiable via le suffixe du symbole : :xnas (NASDAQ), :xnys (NYSE) = bourses USD soumises à Exchange Fee. Les bourses européennes (:xpar, :xetr, :xmil...) n'en génèrent pas.
+        </Def>
+        <Def term="Withholding Tax" color="amber">
+          Retenue à la source sur les dividendes étrangers, prélevée par le pays d'origine avant versement. Partiellement récupérable via les conventions fiscales franco-étrangères.
+        </Def>
+        <Def term="Social Tax" color="amber">
+          Prélèvements sociaux (17,2%) appliqués sur les revenus de capitaux mobiliers en France.
+        </Def>
+        <Def term="Client Interest" color="teal">
+          Intérêts créditeurs versés par {data.broker} sur les liquidités du compte.
+        </Def>
+      </Section>
+
+      {/* ── Structure du fichier ── */}
+      <Section title="📁 Structure du Fichier {data.broker}">
+        <Def term="Montants cumulés" color="indigo">
+          Onglet principal : toutes les transactions journalières (achats, ventes, frais, dividendes, dépôts). Source des KPIs agrégés, des positions et des périodes.
+        </Def>
+        <Def term="B P" color="indigo">
+          <strong>Bénéfices et Pertes</strong> — Onglet des P&L réalisés par position et par jour. Source du P&L Net affiché dans Positions et Performance. Contient uniquement les cessions réalisées, pas les positions encore ouvertes.
+        </Def>
+        <Def term="Performance" color="indigo">
+          Série temporelle journalière : TWR cumulé, valeur du portefeuille, % daily returns. Source du graphique TWR, de la heatmap et du calcul de volatilité.
+        </Def>
+        <Def term="Mouvements d'espèces" color="indigo">
+          Flux de trésorerie : Cash Amount = dépôts/retraits. Source du calcul de l'IRR (XIRR).
+        </Def>
+      </Section>
+
+      {/* ── Types d'actifs ── */}
+      <Section title="🏷️ Types d'Actifs & Exchanges">
+        <Def term="Stock" color="indigo">Actions — instruments de type action cotés sur un marché réglementé.</Def>
+        <Def term="ETF" color="teal">Exchange Traded Fund — fonds indiciel coté en bourse, répliquant un indice ou un panier d'actifs.</Def>
+        <Def term="OPCVM / MutualFund" color="violet">Organisme de Placement Collectif en Valeurs Mobilières — fonds géré activement, valorisé à une VL quotidienne. Dans Saxo : type «MutualFund», transaction «Mutual Funds Traded Value».</Def>
+        <Def term=":xpar" color="indigo">Euronext Paris</Def>
+        <Def term=":xams" color="indigo">Euronext Amsterdam</Def>
+        <Def term=":xetr" color="indigo">Xetra (Deutsche Börse, Francfort)</Def>
+        <Def term=":xmil" color="indigo">Borsa Italiana (Milan)</Def>
+        <Def term=":xnas" color="amber">NASDAQ (New York) — bourse USD, soumise à Exchange Fee</Def>
+        <Def term=":xnys" color="amber">NYSE (New York) — bourse USD, soumise à Exchange Fee</Def>
+      </Section>
 
     </div>
   );
@@ -1407,15 +1537,6 @@ export default function PortfolioAnalyzer() {
                 )}
               </div>
 
-              {/* Note TWR sous-période */}
-              {(dateStart !== (data.dateRange?.min || "") || dateEnd !== (data.dateRange?.max || "")) && (
-                <div className="flex items-start gap-1.5 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-1.5 max-w-sm">
-                  <span className="text-amber-400 text-xs mt-0.5 shrink-0">⚠️</span>
-                  <span className="text-amber-300/80 text-xs leading-relaxed">
-                    Tous les onglets sont recalculés sur cette période. Le TWR affiché est la variation du TWR Saxo entre le 1er et le dernier point — il peut différer du TWR Saxo officiel pour la même période car Saxo le recalcule depuis zéro.
-                  </span>
-                </div>
-              )}
 
               <button onClick={exportCSV} className="px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/20 hover:bg-white/10 transition-all">⬇️ CSV</button>
               <button onClick={exportPDF} className="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg">📄 PDF</button>
@@ -1877,3 +1998,8 @@ export default function PortfolioAnalyzer() {
     </div>
   );
 }
+            {/* Notes */}
+            {tab === "notes" && (
+              <NotesView data={data} dateStart={dateStart} dateEnd={dateEnd} dateRange={data.dateRange} />
+            )}
+
