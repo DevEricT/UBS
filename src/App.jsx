@@ -25,26 +25,21 @@ const parseNum = (v) => {
 // parseDateStr → remplacé par parseSaxoDate
 
 const monthKey = (dateStr) => {
-  if (!dateStr) return "??";
-  const p = String(dateStr).split("-");
-  if (p.length === 3) return `${p[1]}/${p[2]}`;
-  return String(dateStr).slice(0, 7);
+  const ymd = toYMD_safe(dateStr);
+  if (!ymd) return "??";
+  return `${ymd.slice(4,6)}/${ymd.slice(0,4)}`;
 };
 
 const quarterKey = (dateStr) => {
-  if (!dateStr) return "??";
-  const p = String(dateStr).split("-");
-  if (p.length === 3) {
-    const q = Math.ceil(Number(p[1]) / 3);
-    return `Q${q} ${p[2]}`;
-  }
-  return dateStr;
+  const ymd = toYMD_safe(dateStr);
+  if (!ymd) return "??";
+  const m = Number(ymd.slice(4,6));
+  return `Q${Math.ceil(m / 3)} ${ymd.slice(0,4)}`;
 };
 
 const yearKey = (dateStr) => {
-  if (!dateStr) return "??";
-  const p = String(dateStr).split("-");
-  return p.length === 3 ? p[2] : dateStr.slice(0, 4);
+  const ymd = toYMD_safe(dateStr);
+  return ymd ? ymd.slice(0,4) : "??";
 };
 
 const COLORS = ["#6366f1", "#ec4899", "#14b8a6", "#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316"];
@@ -65,10 +60,11 @@ const parseSaxoDate = (d) => {
   const s = String(d).trim().replace(/\//g, "-");
   const p = s.split("-");
   if (p.length !== 3) return null;
-  // YYYY-MM-DD
-  if (p[0].length === 4) return new Date(`${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`);
-  // DD-MM-YYYY
-  return new Date(`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`);
+  const iso = p[0].length === 4
+    ? `${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`
+    : `${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;
+  const dt = new Date(iso);
+  return isNaN(dt.getTime()) ? null : dt;
 };
 
 const toYMD_safe = (d) => {
@@ -104,7 +100,8 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
     return true;
   };
 
-  const mainRows = toRows(sheetMain).filter(r => {
+  // allRows déjà parsé — on filtre sans re-parser
+  const mainRows = allRows.filter(r => {
     if (!r["Date"]) return false;
     if (!inRange(r["Date"])) return false;
     if (filterCompte === "ALL") return true;
@@ -119,6 +116,7 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   let deposits = 0, withdrawals = 0, dividends = 0, interest = 0, cash = 0;
   let volumeNonEur = 0;
   let fees = { commission: 0, tax: 0, exchange: 0, other: 0 };
+  let rebates = { commission: 0 };
 
   mainRows.forEach((row) => {
     const date = String(row["Date"] || "").trim();
@@ -151,10 +149,16 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
       if (affecte === "oui") cash += amt;
       return;
     }
-    if (type === "Commission" || type === "Client Commission Credit") {
-      // Credit = remboursement (positif dans le fichier), Commission = frais (négatif)
-      const feeAmt = type === "Client Commission Credit" ? -Math.abs(amt) : Math.abs(amt);
-      fees.commission += feeAmt; months[mk].fees += feeAmt; quarters[qk].fees += feeAmt; years[yk].fees += feeAmt;
+    if (type === "Commission") {
+      fees.commission += Math.abs(amt); months[mk].fees += Math.abs(amt); quarters[qk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
+      if (affecte === "oui") cash += amt;
+      return;
+    }
+    if (type === "Client Commission Credit") {
+      rebates.commission += Math.abs(amt);
+      months[mk].fees -= Math.abs(amt);
+      quarters[qk].fees -= Math.abs(amt);
+      years[yk].fees -= Math.abs(amt);
       if (affecte === "oui") cash += amt;
       return;
     }
@@ -265,7 +269,7 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
     positions[sym].plNet = pl;
   });
 
-  const totalFees = fees.commission + fees.tax + fees.exchange + fees.other;
+  const totalFees = fees.commission + fees.tax + fees.exchange + fees.other - (rebates.commission || 0);
   const totalBuys  = Object.values(positions).reduce((s, p) => s + p.buys, 0);
   const totalSells = Object.values(positions).reduce((s, p) => s + p.sells, 0);
   const totalVolume = totalBuys + totalSells;
@@ -321,7 +325,7 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
       }
       return Math.abs(npv(r)) < tol ? r * 100 : null;
     };
-    irr = xirr(irrFlows);
+    irr = xirr(irrFlows, valeurTotale);
   }
 
   const sortedMonths = Object.values(months).sort((a, b) => {
@@ -348,14 +352,14 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   return {
     broker,
     dateRange: (() => {
-      const allDates = toRows(sheetMain)
+      const allDates = allRows
         .map(r => r["Date"] ? toYMD_safe(r["Date"]) : "")
         .filter(Boolean).sort();
       if (!allDates.length) return null;
       const toISO = (ymd) => ymd ? `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}` : "";
       return { min: toISO(allDates[0]), max: toISO(allDates[allDates.length-1]) };
     })(),
-    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur, cagr, irr },
+    kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, rebates, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur, cagr, irr },
     positions: Object.values(positions).sort((a, b) => (b.plNet ?? b.realized) - (a.plNet ?? a.realized)),
     months: sortedMonths,
     quarters: sortPeriod(Object.values(quarters), true),
@@ -575,7 +579,7 @@ function TemporelleView({ data }) {
     const dt = parseDMY(r.date);
     return {
       date: r.date,
-      label: dt.toLocaleDateString("fr-FR", { day:"2-digit", month:"short" }),
+      label: dt ? dt.toLocaleDateString("fr-FR", { day:"2-digit", month:"short" }) : r.date,
       twr: parseFloat(r.twr.toFixed(3)),
       drawdown: parseFloat(r.drawdown.toFixed(3)),
       valeur: r.valeur,
@@ -607,6 +611,7 @@ function TemporelleView({ data }) {
   const byDate = {};
   series.forEach(r => {
     const dt = parseDMY(r.date);
+    if (!dt) return;
     const key = dt.toISOString().slice(0,10);
     byDate[key] = r.dailyPct ? r.dailyPct * 100 : 0;
   });
@@ -616,6 +621,7 @@ function TemporelleView({ data }) {
   if (series.length > 0) {
     const d1 = parseDMY(series[0].date);
     const d2 = parseDMY(series[series.length-1].date);
+    if (!d1 || !d2) return;
     // Reculer au lundi de la semaine de d1
     const start = new Date(d1);
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
