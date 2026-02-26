@@ -100,7 +100,8 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
     return true;
   };
 
-  // allRows déjà parsé — on filtre sans re-parser
+  // Parse sheetMain une fois (utilisé pour mainRows, comptes, dateRange)
+  const allRows = toRows(sheetMain);
   const mainRows = allRows.filter(r => {
     if (!r["Date"]) return false;
     if (!inRange(r["Date"])) return false;
@@ -334,7 +335,6 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
     return ay !== by ? Number(ay) - Number(by) : Number(am) - Number(bm);
   });
 
-  const allRows = XLSX.utils.sheet_to_json(sheetMain, { defval: null });
   const comptes = [...new Set(allRows.map(r => r["ID du compte de comptabilisation"]).filter(Boolean))].sort();
 
   // Trier quarters et years
