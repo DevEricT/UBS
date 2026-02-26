@@ -1608,22 +1608,38 @@ export default function PortfolioAnalyzer() {
     reader.onload = (e) => {
       try {
         const text = e.target.result;
-        const lines = text.split(/\r?\n/).filter(Boolean);
-        const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
-        const rows = [];
-        for (let i = 1; i < lines.length; i++) {
-          // Parser CSV avec guillemets
-          const vals = [];
-          let cur = '', inQ = false;
-          for (const ch of lines[i]) {
-            if (ch === '"') { inQ = !inQ; }
-            else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
-            else cur += ch;
+        // Parser CSV robuste : gère les champs entre guillemets avec newlines intégrés
+        const parseCSV = (str) => {
+          const result = [];
+          let row = [], cur = '', inQ = false, i = 0;
+          while (i < str.length) {
+            const ch = str[i];
+            if (ch === '"') {
+              if (inQ && str[i+1] === '"') { cur += '"'; i += 2; continue; } // guillemet échappé
+              inQ = !inQ;
+            } else if (ch === ',' && !inQ) {
+              row.push(cur.replace(/^"|"$/g,'').trim()); cur = ''; i++; continue;
+            } else if ((ch === '\n' || (ch === '\r' && str[i+1] === '\n')) && !inQ) {
+              if (ch === '\r') i++;
+              row.push(cur.replace(/^"|"$/g,'').trim()); cur = '';
+              if (row.some(c => c !== '')) result.push(row);
+              row = []; i++; continue;
+            }
+            cur += ch; i++;
           }
-          vals.push(cur.trim());
+          if (cur || row.length) { row.push(cur.replace(/^"|"$/g,'').trim()); if (row.some(c => c !== '')) result.push(row); }
+          return result;
+        };
+
+        const allRows = parseCSV(text);
+        if (allRows.length < 2) return;
+        const headers = allRows[0];
+        const rows = [];
+        for (let i = 1; i < allRows.length; i++) {
+          const vals = allRows[i];
           if (vals.length < 5) continue;
           const row = {};
-          headers.forEach((h, i) => row[h] = vals[i] || '');
+          headers.forEach((h, j) => row[h] = (vals[j] || '').replace(/\n/g,'').trim());
           rows.push(row);
         }
 
