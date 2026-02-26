@@ -514,6 +514,7 @@ const TABS = [
   { id: "positions",   label: "💼 Positions" },
   { id: "trends",      label: "📅 Trends" },
   { id: "fees",        label: "💰 Frais" },
+  { id: "portefeuille", label: "📋 Portefeuille" },
   { id: "notes",       label: "📖 Notes" },
 ];
 
@@ -776,6 +777,231 @@ function TemporelleView({ data }) {
   );
 }
 
+
+
+// ─── Composant PortefeuilleView ──────────────────────────────────────────────
+
+function PortefeuilleView({ positionsData, parsePositionsCSV, posFileName, data }) {
+  const [sortKey, setSortKey] = useState("valeur");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "desc" ? "asc" : "desc");
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+
+  const ASSET_COLORS = {
+    'Actions':                      'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+    'Exchange Traded Fund (ETF)':   'bg-teal-500/20 text-teal-300 border-teal-500/30',
+    'OPCVM':                        'bg-violet-500/20 text-violet-300 border-violet-500/30',
+  };
+
+  const COMPTE_COLORS = {
+    'Compte-titres': 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+    'PEA':           'bg-green-500/20 text-green-300 border-green-500/30',
+    'PEA-PME':       'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  };
+
+  // Zone de drop si pas encore de fichier
+  if (!positionsData) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-6">
+        <div className="text-6xl">📋</div>
+        <div className="text-center">
+          <h3 className="text-white font-semibold text-lg mb-2">Fichier Positions manquant</h3>
+          <p className="text-white/50 text-sm mb-1">Glissez le fichier <span className="font-mono text-indigo-300">Positions_*.csv</span> exporté depuis Saxo</p>
+          <p className="text-white/30 text-xs">SaxoTrader → Positions → icône Export (coin supérieur droit)</p>
+        </div>
+        <label className="cursor-pointer px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold transition-all shadow-lg">
+          📂 Charger le fichier Positions CSV
+          <input type="file" accept=".csv" className="hidden" onChange={e => parsePositionsCSV(e.target.files[0])} />
+        </label>
+      </div>
+    );
+  }
+
+  const { positions, totalValeur, totalLatent, byType, byCompte } = positionsData;
+
+  // Tri
+  const sorted = [...positions].sort((a, b) => {
+    let va, vb;
+    if      (sortKey === "name")    { va = a.name; vb = b.name; return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); }
+    else if (sortKey === "sym")     { va = a.sym;  vb = b.sym;  return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va); }
+    else if (sortKey === "valeur")  { va = a.valeur;  vb = b.valeur; }
+    else if (sortKey === "plNet")   { va = a.plNet;   vb = b.plNet; }
+    else if (sortKey === "plPct")   { va = a.plPct;   vb = b.plPct; }
+    else if (sortKey === "var1j")   { va = a.variation1j; vb = b.variation1j; }
+    else if (sortKey === "qty")     { va = a.qty;     vb = b.qty; }
+    else va = vb = 0;
+    return sortDir === "asc" ? va - vb : vb - va;
+  });
+
+  const SortTh = ({ label, col, right=true }) => (
+    <th onClick={() => handleSort(col)}
+      className={`py-3 px-3 font-semibold cursor-pointer select-none text-xs uppercase tracking-wide transition-colors hover:text-white ${right ? "text-right" : "text-left"} ${sortKey === col ? "text-white" : "text-indigo-300"}`}>
+      {label} {sortKey === col ? (sortDir === "desc" ? "↓" : "↑") : <span className="text-white/20">↕</span>}
+    </th>
+  );
+
+  // Pie chart répartition
+  const pieType = Object.entries(byType).map(([k, v]) => ({ name: k.replace('Exchange Traded Fund (ETF)','ETF'), value: Math.round(v.valeur) }));
+  const pieCompte = Object.entries(byCompte).filter(([k]) => k && k !== '?').map(([k, v]) => ({ name: k, value: Math.round(v.valeur) }));
+  const PIE_COLORS = ['#6366f1','#14b8a6','#8b5cf6','#f59e0b','#10b981','#3b82f6'];
+
+  return (
+    <div className="space-y-5">
+
+      {/* Header snapshot */}
+      <div className="flex items-center justify-between">
+        <div className="text-white/40 text-xs font-mono">📋 {posFileName} — snapshot {new Date().toLocaleDateString('fr-FR')}</div>
+        <label className="cursor-pointer text-xs text-indigo-400 hover:text-white transition-colors px-3 py-1.5 border border-white/15 rounded-lg">
+          🔄 Changer de fichier
+          <input type="file" accept=".csv" className="hidden" onChange={e => parsePositionsCSV(e.target.files[0])} />
+        </label>
+      </div>
+
+      {/* KPIs snapshot */}
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+        <KpiCardSm label="Positions ouvertes" value={positions.length} icon="📊" color="indigo"
+          tooltip="Nombre de lignes dans le fichier Positions CSV." />
+        <KpiCardSm label="Valeur de marché" value={fmtEur(totalValeur)} icon="💼" color="indigo"
+          tooltip="Valeur totale du portefeuille au prix de marché actuel." />
+        <KpiCardSm label="P&L Latent" value={fmtEur(totalLatent)} icon="📍" color={totalLatent >= 0 ? "green" : "red"}
+          tooltip="Plus/moins-value latente totale sur positions ouvertes (non réalisée)." />
+        <KpiCardSm label="P&L Latent %" value={(totalValeur > 0 ? (totalLatent / (totalValeur - totalLatent) * 100) : 0).toFixed(2) + " %"} icon="%" color={totalLatent >= 0 ? "green" : "red"}
+          tooltip="P&L latent / coût d'acquisition total." />
+        {data && <KpiCardSm label="P&L Total" value={fmtEur(data.kpis.netResult + totalLatent)} icon="🏆" color={(data.kpis.netResult + totalLatent) >= 0 ? "green" : "red"}
+          tooltip="P&L réalisé (historique) + P&L latent (positions ouvertes) = performance complète du portefeuille." />}
+      </div>
+
+      {/* Répartition */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Par type */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+          <h3 className="text-white font-semibold text-sm uppercase tracking-widest mb-4">Par type d'actif</h3>
+          <div className="flex gap-4 items-center">
+            <ResponsiveContainer width={130} height={130}>
+              <PieChart>
+                <Pie data={pieType} dataKey="value" innerRadius={35} outerRadius={60} paddingAngle={3}>
+                  {pieType.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+                <Tooltip formatter={v => fmtEur(v)} contentStyle={{ background:"#1e1b4b", border:"1px solid #4338ca", borderRadius:8, color:"#fff", fontSize:11 }} itemStyle={{color:"#fff"}} labelStyle={{color:"#fff"}} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="flex-1 space-y-2">
+              {Object.entries(byType).map(([t, v], i) => (
+                <div key={t} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ width:8, height:8, background:PIE_COLORS[i], borderRadius:2, display:'inline-block' }} />
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full border ${ASSET_COLORS[t] || 'bg-white/10 text-white/60 border-white/20'}`}>{t.replace('Exchange Traded Fund (ETF)','ETF')}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-white text-xs font-semibold">{fmtEur(v.valeur)}</div>
+                    <div className={`text-xs ${v.plNet >= 0 ? 'text-green-400/70' : 'text-red-400/70'}`}>{v.plNet >= 0 ? '+' : ''}{fmtEur(v.plNet)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Par compte */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+          <h3 className="text-white font-semibold text-sm uppercase tracking-widest mb-4">Par compte</h3>
+          <div className="flex gap-4 items-center">
+            <ResponsiveContainer width={130} height={130}>
+              <PieChart>
+                <Pie data={pieCompte} dataKey="value" innerRadius={35} outerRadius={60} paddingAngle={3}>
+                  {pieCompte.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+                <Tooltip formatter={v => fmtEur(v)} contentStyle={{ background:"#1e1b4b", border:"1px solid #4338ca", borderRadius:8, color:"#fff", fontSize:11 }} itemStyle={{color:"#fff"}} labelStyle={{color:"#fff"}} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="flex-1 space-y-2">
+              {Object.entries(byCompte).filter(([k]) => k && k !== '?').map(([t, v], i) => (
+                <div key={t} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span style={{ width:8, height:8, background:PIE_COLORS[i], borderRadius:2, display:'inline-block' }} />
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full border ${COMPTE_COLORS[t] || 'bg-white/10 text-white/60 border-white/20'}`}>{t}</span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-white text-xs font-semibold">{fmtEur(v.valeur)}</div>
+                    <div className="text-white/40 text-xs">{(v.valeur / totalValeur * 100).toFixed(1)} %</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tableau positions */}
+      <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <span className="text-white font-semibold text-sm uppercase tracking-widest">Positions Ouvertes</span>
+          <span className="text-white/40 text-xs">{positions.length} lignes · snapshot temps réel</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-white/5">
+                <SortTh label="Instrument" col="name" right={false} />
+                <th className="text-left text-indigo-300 py-3 px-3 text-xs uppercase">Type</th>
+                <th className="text-left text-indigo-300 py-3 px-3 text-xs uppercase">Compte</th>
+                <SortTh label="Qté" col="qty" />
+                <SortTh label="Px entrée" col="px" />
+                <SortTh label="Px actuel" col="px" />
+                <SortTh label="Valeur €" col="valeur" />
+                <SortTh label="P&L €" col="plNet" />
+                <SortTh label="P&L %" col="plPct" />
+                <SortTh label="1J %" col="var1j" />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((p, i) => (
+                <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                  <td className="py-2.5 px-3">
+                    <div className="text-white text-xs font-semibold truncate max-w-xs">{p.name}</div>
+                    <div className="text-white/40 text-xs font-mono">{p.sym}</div>
+                  </td>
+                  <td className="py-2.5 px-3">
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full border ${ASSET_COLORS[p.assetLabel] || 'bg-white/10 text-white/60 border-white/20'}`}>
+                      {p.assetLabel === 'Exchange Traded Fund (ETF)' ? 'ETF' : p.assetLabel}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3">
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full border ${COMPTE_COLORS[p.compte] || 'bg-white/10 text-white/60 border-white/20'}`}>
+                      {p.compte || '—'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3 text-right text-white/70 text-xs">{p.qty.toLocaleString('fr-FR')}</td>
+                  <td className="py-2.5 px-3 text-right text-white/70 text-xs">{p.prixEntree.toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:4})}</td>
+                  <td className="py-2.5 px-3 text-right text-white text-xs font-semibold">{p.prixActuel.toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:4})}</td>
+                  <td className="py-2.5 px-3 text-right text-white text-xs font-bold">{fmtEur(p.valeur)}</td>
+                  <td className={`py-2.5 px-3 text-right text-xs font-bold ${p.plNet >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(p.plNet)}</td>
+                  <td className={`py-2.5 px-3 text-right text-xs font-bold ${p.plPct >= 0 ? "text-green-400" : "text-red-400"}`}>{p.plPct >= 0 ? "+" : ""}{p.plPct.toFixed(2)} %</td>
+                  <td className={`py-2.5 px-3 text-right text-xs ${p.variation1j >= 0 ? "text-green-400/70" : "text-red-400/70"}`}>{p.variation1j >= 0 ? "+" : ""}{p.variation1j.toFixed(2)} %</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-white/5 font-bold border-t border-white/20">
+                <td className="py-3 px-3 text-white text-xs uppercase" colSpan={6}>Total</td>
+                <td className="py-3 px-3 text-right text-white text-xs">{fmtEur(totalValeur)}</td>
+                <td className={`py-3 px-3 text-right text-xs ${totalLatent >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(totalLatent)}</td>
+                <td className={`py-3 px-3 text-right text-xs ${totalLatent >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {(totalValeur > 0 ? (totalLatent / (totalValeur - totalLatent) * 100) : 0).toFixed(2)} %
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  );
+}
 
 // ─── Composant NotesView ─────────────────────────────────────────────────────
 
@@ -1371,6 +1597,90 @@ export default function PortfolioAnalyzer() {
   const [dateStart, setDateStart]       = useState("");
   const [dateEnd,   setDateEnd]         = useState("");
   const [fileName, setFileName] = useState("");
+  const [positionsData, setPositionsData] = useState(null);
+  const [posFileName, setPosFileName] = useState("");
+
+  // Parser du fichier Positions CSV Saxo
+  const parsePositionsCSV = useCallback((file) => {
+    if (!file) return;
+    setPosFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g,'').trim());
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+          // Parser CSV avec guillemets
+          const vals = [];
+          let cur = '', inQ = false;
+          for (const ch of lines[i]) {
+            if (ch === '"') { inQ = !inQ; }
+            else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+            else cur += ch;
+          }
+          vals.push(cur.trim());
+          if (vals.length < 5) continue;
+          const row = {};
+          headers.forEach((h, i) => row[h] = vals[i] || '');
+          rows.push(row);
+        }
+
+        const parseFR = (s) => {
+          if (!s) return 0;
+          return parseFloat(String(s).replace(/\s/g,'').replace(',','.')) || 0;
+        };
+        const parsePct = (s) => {
+          if (!s) return 0;
+          return parseFloat(String(s).replace('%','').replace(',','.')) || 0;
+        };
+
+        const TYPE_MAP = {
+          'Actions': 'Stock',
+          'Exchange Traded Fund (ETF)': 'Etf',
+          'OPCVM': 'MutualFund',
+          'ETF': 'Etf',
+        };
+
+        const positions = rows
+          .filter(r => r['Symbole'] && r['Instruments'])
+          .map(r => ({
+            sym:        r['Symbole'].trim(),
+            name:       r['Instruments'].trim(),
+            isin:       r['ISIN'] || '',
+            assetType:  TYPE_MAP[r["Type d'actif"]] || r["Type d'actif"] || 'Stock',
+            assetLabel: r["Type d'actif"] || 'Stock',
+            compte:     r['Compte'] || '',
+            qty:        parseFR(r['Quantité']),
+            prixEntree: parseFR(r['Prix entrée']),
+            prixActuel: parseFR(r['Prix actuel']),
+            valeur:     parseFR(r['Valeur actuelle (EUR)']),
+            exposition: parseFR(r['Exposition (EUR)']),
+            plNet:      parseFR(r['+/- Nette (EUR)']),
+            plPct:      parsePct(r['+/- (%)']),
+            devise:     r['Devise'] || 'EUR',
+            variation1j: parsePct(r['% 1J']),
+          }));
+
+        const totalValeur  = positions.reduce((s,p) => s + p.valeur, 0);
+        const totalLatent  = positions.reduce((s,p) => s + p.plNet, 0);
+        const byType = {};
+        const byCompte = {};
+        positions.forEach(p => {
+          if (!byType[p.assetLabel])   byType[p.assetLabel]   = { n:0, valeur:0, plNet:0 };
+          if (!byCompte[p.compte||'?']) byCompte[p.compte||'?'] = { n:0, valeur:0, plNet:0 };
+          byType[p.assetLabel].n++;   byType[p.assetLabel].valeur   += p.valeur; byType[p.assetLabel].plNet += p.plNet;
+          byCompte[p.compte||'?'].n++; byCompte[p.compte||'?'].valeur += p.valeur; byCompte[p.compte||'?'].plNet += p.plNet;
+        });
+
+        setPositionsData({ positions, totalValeur, totalLatent, byType, byCompte, snapshot: file.name });
+      } catch(err) {
+        console.error('Erreur Positions CSV:', err);
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  }, []);
 
   const handleFile = useCallback((file) => {
     if (!file) return;
@@ -1992,6 +2302,11 @@ export default function PortfolioAnalyzer() {
                 </div>
               </div>
             )}
+            {/* Portefeuille */}
+            {tab === "portefeuille" && (
+              <PortefeuilleView positionsData={positionsData} parsePositionsCSV={parsePositionsCSV} posFileName={posFileName} data={data} />
+            )}
+
             {/* Notes */}
             {tab === "notes" && (
               <NotesView data={data} dateStart={dateStart} dateEnd={dateEnd} dateRange={data.dateRange} />
