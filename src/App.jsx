@@ -83,10 +83,14 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   const isIBKR = sheetNames.some(s => s.toLowerCase().includes("activity"));
   const broker = isSaxo ? "Saxo Bank" : isIBKR ? "Interactive Brokers" : "Broker inconnu";
 
-  const sheetMain = workbook.Sheets["Montants cumulés"] || workbook.Sheets[workbook.SheetNames[0]];
-  const sheetPerf = workbook.Sheets["Performance"];
-  const sheetBP   = workbook.Sheets["B P"];
-  const sheetMvt  = workbook.Sheets["Mouvements d espèces"];
+  const findSheet = (pred) => {
+    const name = workbook.SheetNames.find(n => pred(String(n).toLowerCase()));
+    return name ? workbook.Sheets[name] : null;
+  };
+  const sheetMain = findSheet(n => n.includes("montant")) || workbook.Sheets[workbook.SheetNames[0]];
+  const sheetPerf = findSheet(n => n.includes("performance"));
+  const sheetBP   = findSheet(n => n.includes("b p") || n === "b p");
+  const sheetMvt  = findSheet(n => n.includes("mouvement") && n.includes("esp"));
 
   const toRows = (sheet) => sheet ? XLSX.utils.sheet_to_json(sheet, { defval: null }) : [];
 
@@ -237,7 +241,7 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   const cashflows = mvtRows.map(r => ({
     date: parseDateIRR(r["Date"]),
     amount: -parseNum(r["Montant dans la devise du compte"]), // inversé : dépôt = sortie investisseur
-  })).filter(c => !isNaN(c.date) && c.amount !== 0);
+  })).filter(c => c.date && !isNaN(c.date.getTime()) && c.amount !== 0);
 
   const plMap = {};
   const ventilation = { Stock: { pl: 0, buys: 0, sells: 0, fees: 0, label: "Actions" }, Etf: { pl: 0, buys: 0, sells: 0, fees: 0, label: "ETFs" }, MutualFund: { pl: 0, buys: 0, sells: 0, fees: 0, label: "OPCVM" } };
@@ -295,7 +299,10 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   if (cashflows.length > 0 && valeurTotale > 0) {
     const irrFlows = [
       ...cashflows,
-      { date: lastPerf ? parseSaxoDate(lastPerf.date) : new Date(), amount: valeurTotale },
+      (() => {
+      const d = lastPerf ? parseSaxoDate(lastPerf.date) : null;
+      return { date: (d && !isNaN(d.getTime())) ? d : new Date(), amount: valeurTotale };
+    })(),
     ];
     const xirr = (flows, valTotal) => {
       const msPerYear = 365.25 * 24 * 3600 * 1000;
@@ -621,7 +628,9 @@ function TemporelleView({ data }) {
   if (series.length > 0) {
     const d1 = parseDMY(series[0].date);
     const d2 = parseDMY(series[series.length-1].date);
-    if (!d1 || !d2) return;
+    if (!d1 || !d2) return (
+      <div className="text-white/40 text-center py-10">Données de dates invalides dans l'onglet Performance (impossible de construire la heatmap).</div>
+    );
     // Reculer au lundi de la semaine de d1
     const start = new Date(d1);
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
@@ -1290,8 +1299,8 @@ function buildYearStats(year, data) {
 
   // TWR annuel depuis perfSeriesFull
   const yearSeries = (data.perfSeriesFull || []).filter(r => {
-    const p = String(r.date).split("-");
-    return p.length === 3 && p[2] === String(year);
+    const ymd = toYMD_safe(r.date);
+    return ymd && ymd.slice(0,4) === String(year);
   });
 
   // Calcul TWR annuel : dernier twr - premier twr de l'année
@@ -1334,11 +1343,10 @@ function buildYearStats(year, data) {
   // Meilleur / pire mois
   const monthlyTWR = {};
   yearSeries.forEach(r => {
-    const p = String(r.date).split("-");
-    if (p.length === 3) {
-      const mk = `${p[1]}/${p[2]}`;
-      monthlyTWR[mk] = r.twr;
-    }
+    const ymd = toYMD_safe(r.date);
+    if (!ymd) return;
+    const mk = `${ymd.slice(4,6)}/${ymd.slice(0,4)}`; // MM/YYYY
+    monthlyTWR[mk] = r.twr;
   });
   const monthKeys = Object.keys(monthlyTWR).sort((a,b) => {
     const [am, ay] = a.split("/"); const [bm, by] = b.split("/");
@@ -1986,6 +1994,7 @@ export default function PortfolioAnalyzer() {
                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                   <KpiCard label="Frais Totaux" value={"-" + fmtEur(data.kpis.totalFees)} icon="🏦" color="amber" tooltip="Somme de toutes les charges : commissions, taxe FFT, frais de change, taxes sociales." />
                   <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} sub={data.kpis.totalVolume > 0 ? (data.kpis.fees.commission / data.kpis.totalVolume * 100).toFixed(3) + " % du volume traité" : ""} icon="📋" color="amber" tooltip="Frais de courtage (Commission) sur chaque ordre. % = commissions / (achats + ventes) : taux effectif moyen sur le volume total traité." />
+                  {data.kpis.rebates?.commission > 0 && <KpiCard label="Crédits comm." value={"+" + fmtEur(data.kpis.rebates.commission)} icon="↩️" color="teal" tooltip="Remboursements de commissions (Client Commission Credit) — déjà déduits des Frais Totaux." />}
                   <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="Taxe sur les Transactions Financières française (0,3%) applicable aux achats d’actions françaises de plus de 1 milliard de capitalisation." />
                   <KpiCard label="Frais / Volume" value={data.kpis.totalVolume > 0 ? ((data.kpis.totalFees / data.kpis.totalVolume) * 100).toFixed(3) + " %" : "N/A"} sub={data.kpis.netDeposits > 0 ? ((data.kpis.totalFees / data.kpis.netDeposits) * 100).toFixed(3) + " % du capital" : ""} icon="⚖️" color="amber" tooltip="Frais totaux / (achats + ventes) = coût effectif moyen sur le volume total traité. Sous en-tête : frais / capital net investi." />
                 </div>
@@ -2352,6 +2361,7 @@ export default function PortfolioAnalyzer() {
                 <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                   <KpiCard label="Total Frais" value={"-"+fmtEur(data.kpis.totalFees)} icon="💸" color="red" tooltip="Somme de toutes les charges prélevées : courtage, FFT, frais de change, taxes sociales et retenues à la source." />
                   <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} sub={data.kpis.totalVolume > 0 ? (data.kpis.fees.commission / data.kpis.totalVolume * 100).toFixed(3) + " % du volume traité" : ""} icon="🏦" color="amber" tooltip="Frais de courtage (Commission) sur chaque ordre. % = commissions / (achats + ventes) : taux effectif moyen sur le volume total traité." />
+                  {data.kpis.rebates?.commission > 0 && <KpiCard label="Crédits comm." value={"+" + fmtEur(data.kpis.rebates.commission)} icon="↩️" color="teal" tooltip="Remboursements de commissions (Client Commission Credit) — déjà déduits des Frais Totaux." />}
                   <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="French Financial Transaction Tax (0,3%) sur les achats d’actions françaises de plus de 1 Md€ de capitalisation." />
                   <KpiCard label="Exchange + Autres" value={"-"+fmtEur(data.kpis.fees.exchange + data.kpis.fees.other)} sub={data.kpis.volumeNonEur > 0 ? (data.kpis.fees.exchange / data.kpis.volumeNonEur * 100).toFixed(3) + " % vol. hors EUR" : "—"} icon="🔄" color="amber" tooltip="Exchange Fee rapporté au volume traité en devises étrangères (hors EUR) uniquement. Social Tax, Withholding Tax et Advanced Income Tax inclus dans le total." />
                 </div>
