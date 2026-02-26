@@ -22,10 +22,7 @@ const parseNum = (v) => {
   return isNaN(n) ? 0 : n;
 };
 
-const parseDateStr = (d) => {
-  const p = String(d).split("-");
-  return p.length === 3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`) : new Date(d);
-};
+// parseDateStr → remplacé par parseSaxoDate
 
 const monthKey = (dateStr) => {
   if (!dateStr) return "??";
@@ -62,6 +59,27 @@ const COMPTES_LABELS = {
 
 // ─── Processor ───────────────────────────────────────────────────────────────
 
+// ─── Parse date universel (DMY ou YMD, avec - ou /) ─────────────────────────
+const parseSaxoDate = (d) => {
+  if (!d) return null;
+  const s = String(d).trim().replace(/\//g, "-");
+  const p = s.split("-");
+  if (p.length !== 3) return null;
+  // YYYY-MM-DD
+  if (p[0].length === 4) return new Date(`${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`);
+  // DD-MM-YYYY
+  return new Date(`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`);
+};
+
+const toYMD_safe = (d) => {
+  if (!d) return "";
+  const s = String(d).trim().replace(/\//g, "-");
+  const p = s.split("-");
+  if (p.length !== 3) return "";
+  if (p[0].length === 4) return p[0] + p[1].padStart(2,"0") + p[2].padStart(2,"0");
+  return p[2] + p[1].padStart(2,"0") + p[0].padStart(2,"0");
+};
+
 function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd = null) {
   // ── Détection automatique du broker par signature de fichier ──
   const sheetNames = workbook.SheetNames;
@@ -76,15 +94,10 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
 
   const toRows = (sheet) => sheet ? XLSX.utils.sheet_to_json(sheet, { defval: null }) : [];
 
-  // Convertir DD-MM-YYYY en comparable YYYYMMDD
-  const toYMD = (d) => {
-    const p = String(d).split("-");
-    return p.length === 3 ? p[2]+p[1]+p[0] : "";
-  };
   const ymdStart = dateStart ? dateStart.replace(/-/g, "") : null;
   const ymdEnd   = dateEnd   ? dateEnd.replace(/-/g, "")   : null;
   const inRange  = (d) => {
-    const ymd = toYMD(d);
+    const ymd = toYMD_safe(d);
     if (!ymd) return false;
     if (ymdStart && ymd < ymdStart) return false;
     if (ymdEnd   && ymd > ymdEnd)   return false;
@@ -139,7 +152,9 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
       return;
     }
     if (type === "Commission" || type === "Client Commission Credit") {
-      fees.commission += Math.abs(amt); months[mk].fees += Math.abs(amt); quarters[qk].fees += Math.abs(amt); years[yk].fees += Math.abs(amt);
+      // Credit = remboursement (positif dans le fichier), Commission = frais (négatif)
+      const feeAmt = type === "Client Commission Credit" ? -Math.abs(amt) : Math.abs(amt);
+      fees.commission += feeAmt; months[mk].fees += feeAmt; quarters[qk].fees += feeAmt; years[yk].fees += feeAmt;
       if (affecte === "oui") cash += amt;
       return;
     }
@@ -255,14 +270,14 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   const totalSells = Object.values(positions).reduce((s, p) => s + p.sells, 0);
   const totalVolume = totalBuys + totalSells;
   const netDeposits = deposits - withdrawals;
-  const netResult = dividends + interest + Object.values(positions).reduce((s, p) => s + (p.plNet ?? p.realized), 0) - totalFees;
+  const netResult = dividends + interest + Object.values(positions).reduce((s, p) => s + (p.plNet ?? 0), 0) - totalFees;
   const perfPct = netDeposits > 0 ? (netResult / netDeposits) * 100 : 0;
 
   // ── CAGR : annualisation du TWR officiel Saxo ──────────────────────────
   let cagr = 0;
   if (firstPerf && lastPerf && firstPerf.date !== lastPerf.date) {
-    const d1 = parseDateStr(firstPerf.date);
-    const d2 = parseDateStr(lastPerf.date);
+    const d1 = parseSaxoDate(firstPerf.date);
+    const d2 = parseSaxoDate(lastPerf.date);
     const nbJours = (d2 - d1) / (1000 * 60 * 60 * 24);
     if (nbJours > 0 && twr > -100) {
       cagr = (Math.pow(1 + twr / 100, 365 / nbJours) - 1) * 100;
@@ -275,27 +290,36 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   if (cashflows.length > 0 && valeurTotale > 0) {
     const irrFlows = [
       ...cashflows,
-      { date: lastPerf ? parseDateStr(lastPerf.date) : new Date(), amount: valeurTotale },
+      { date: lastPerf ? parseSaxoDate(lastPerf.date) : new Date(), amount: valeurTotale },
     ];
-    const xirr = (flows) => {
+    const xirr = (flows, valTotal) => {
       const msPerYear = 365.25 * 24 * 3600 * 1000;
       const t0 = flows[0].date.getTime();
       const npv = (rate) => flows.reduce((s, f) => {
         const t = (f.date.getTime() - t0) / msPerYear;
         return s + f.amount / Math.pow(1 + rate, t);
       }, 0);
-      // Newton-Raphson
+      const tol = Math.max(100, (valTotal || 1e6) * 1e-6);
       let r = 0.1;
       for (let i = 0; i < 100; i++) {
-        const f = npv(r);
-        const dr = 1e-6;
-        const fp = (npv(r + dr) - f) / dr;
+        const fn = npv(r);
+        const fp = (npv(r + 1e-6) - fn) / 1e-6;
         if (Math.abs(fp) < 1e-12) break;
-        const nr = r - f / fp;
+        const nr = r - fn / fp;
         if (Math.abs(nr - r) < 1e-8) { r = nr; break; }
         r = Math.max(-0.999, Math.min(10, nr));
       }
-      return Math.abs(npv(r)) < 1000 ? r * 100 : null;
+      if (Math.abs(npv(r)) < tol) return r * 100;
+      // Bisection fallback
+      let lo = -0.999, hi = 10;
+      if (npv(lo) * npv(hi) > 0) return null;
+      for (let i = 0; i < 60; i++) {
+        const mid = (lo + hi) / 2;
+        if (Math.abs(hi - lo) < 1e-8) { r = mid; break; }
+        npv(lo) * npv(mid) <= 0 ? (hi = mid) : (lo = mid);
+        r = mid;
+      }
+      return Math.abs(npv(r)) < tol ? r * 100 : null;
     };
     irr = xirr(irrFlows);
   }
@@ -325,10 +349,10 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
     broker,
     dateRange: (() => {
       const allDates = toRows(sheetMain)
-        .map(r => r["Date"] ? toYMD(r["Date"]) : "")
+        .map(r => r["Date"] ? toYMD_safe(r["Date"]) : "")
         .filter(Boolean).sort();
       if (!allDates.length) return null;
-      const toISO = (ymd) => `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}`;
+      const toISO = (ymd) => ymd ? `${ymd.slice(0,4)}-${ymd.slice(4,6)}-${ymd.slice(6,8)}` : "";
       return { min: toISO(allDates[0]), max: toISO(allDates[allDates.length-1]) };
     })(),
     kpis: { deposits, withdrawals, netDeposits, dividends, interest, totalFees, fees, netResult, perfPct, cash, twr, valeurTotale, totalBuys, totalSells, totalVolume, volumeNonEur, cagr, irr },
@@ -374,7 +398,7 @@ function KpiCard({ label, value, sub, color = "indigo", icon, tooltip }) {
 function InfoTooltip({ text }) {
   const [show, setShow] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
-  const ref = React.useRef(null);
+  const ref = useRef(null);
 
   const handleEnter = () => {
     if (ref.current) {
@@ -442,18 +466,27 @@ function KpiCardSm({ label, value, color = "indigo", icon, tooltip }) {
 
 // ─── PDF builder ──────────────────────────────────────────────────────────────
 
+// HTML escape helper
+const esc = (s) =>
+  String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
 function buildPDF(data, filterLabel) {
-  const { kpis, positions } = data;
+  const { kpis, positions, broker: pdfBroker } = data;
   const top5  = positions.slice(0, 5);
   const flop5 = [...positions].sort((a, b) => (a.plNet ?? a.realized) - (b.plNet ?? b.realized)).slice(0, 5);
   const posRow = (p) => {
     const pl = p.plNet ?? p.realized;
-    return `<tr><td>${p.sym}</td><td>${p.name.slice(0, 35)}</td>
+    return `<tr><td>${esc(p.sym)}</td><td>${esc(p.name).slice(0, 35)}</td>
       <td class="num">${fmtEur(p.buys)}</td><td class="num">${fmtEur(p.sells)}</td>
       <td class="num ${pl >= 0 ? "pos" : "neg"}">${fmtEur(pl)}</td></tr>`;
   };
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
-<title>Rapport ${broker} ${new Date().toLocaleDateString("fr-FR")}</title>
+<title>Rapport ${pdfBroker} ${new Date().toLocaleDateString("fr-FR")}</title>
 <style>
   @page{margin:18mm}*{box-sizing:border-box}
   body{font-family:'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;margin:0;padding:20px}
@@ -470,7 +503,7 @@ function buildPDF(data, filterLabel) {
   td{padding:7px 10px;border-bottom:1px solid #f1f5f9}tr:nth-child(even) td{background:#f8fafc}
   .num{text-align:right}.footer{text-align:center;color:#94a3b8;font-size:10px;margin-top:36px}
 </style></head><body><div class="page">
-  <h1>📊 Rapport Portefeuille ${broker}</h1>
+  <h1>📊 Rapport Portefeuille ${pdfBroker}</h1>
   <div class="sub">Généré le ${new Date().toLocaleDateString("fr-FR")} · ${filterLabel} · ${positions.length} positions</div>
   <h2>Performance Globale</h2>
   <div class="g4">
@@ -500,7 +533,7 @@ function buildPDF(data, filterLabel) {
   <h2>Toutes les Positions (${positions.length})</h2>
   <table><thead><tr><th>Symbole</th><th>Nom</th><th class="num">Achats</th><th class="num">Ventes</th><th class="num">P&L Net</th></tr></thead>
   <tbody>${positions.map(posRow).join("")}</tbody></table>
-  <div class="footer">${broker} Analyzer · ${new Date().toLocaleString("fr-FR")}</div>
+  <div class="footer">${pdfBroker} Analyzer · ${new Date().toLocaleString("fr-FR")}</div>
 </div></body></html>`;
 }
 
@@ -536,10 +569,7 @@ function TemporelleView({ data }) {
   });
 
   // Formater dates pour affichage
-  const parseDMY = (d) => {
-    const p = String(d).split("-");
-    return p.length === 3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`) : new Date(d);
-  };
+  const parseDMY = parseSaxoDate;
 
   const chartData = serieWithDD.map(r => {
     const dt = parseDMY(r.date);
@@ -831,8 +861,10 @@ function PortefeuilleView({ positionsData, parsePositionsCSV, posFileName, data 
     else if (sortKey === "valeur")  { va = a.valeur;  vb = b.valeur; }
     else if (sortKey === "plNet")   { va = a.plNet;   vb = b.plNet; }
     else if (sortKey === "plPct")   { va = a.plPct;   vb = b.plPct; }
-    else if (sortKey === "var1j")   { va = a.variation1j; vb = b.variation1j; }
-    else if (sortKey === "qty")     { va = a.qty;     vb = b.qty; }
+    else if (sortKey === "var1j")      { va = a.variation1j; vb = b.variation1j; }
+    else if (sortKey === "qty")        { va = a.qty;        vb = b.qty; }
+    else if (sortKey === "prixEntree") { va = a.prixEntree; vb = b.prixEntree; }
+    else if (sortKey === "prixActuel") { va = a.prixActuel; vb = b.prixActuel; }
     else va = vb = 0;
     return sortDir === "asc" ? va - vb : vb - va;
   });
@@ -950,8 +982,8 @@ function PortefeuilleView({ positionsData, parsePositionsCSV, posFileName, data 
                 <th className="text-left text-indigo-300 py-3 px-3 text-xs uppercase">Type</th>
                 <th className="text-left text-indigo-300 py-3 px-3 text-xs uppercase">Compte</th>
                 <SortTh label="Qté" col="qty" />
-                <SortTh label="Px entrée" col="px" />
-                <SortTh label="Px actuel" col="px" />
+                <SortTh label="Px entrée" col="prixEntree" />
+                <SortTh label="Px actuel" col="prixActuel" />
                 <SortTh label="Valeur €" col="valeur" />
                 <SortTh label="P&L €" col="plNet" />
                 <SortTh label="P&L %" col="plPct" />
@@ -1016,9 +1048,17 @@ function NotesView({ data, dateStart, dateEnd, dateRange }) {
     </div>
   );
 
+  const DEF_COLORS = {
+    indigo: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
+    teal:   "bg-teal-500/20 text-teal-300 border-teal-500/30",
+    green:  "bg-green-500/20 text-green-300 border-green-500/30",
+    amber:  "bg-amber-500/20 text-amber-300 border-amber-500/30",
+    red:    "bg-red-500/20 text-red-300 border-red-500/30",
+    violet: "bg-violet-500/20 text-violet-300 border-violet-500/30",
+  };
   const Def = ({ term, color = "indigo", children }) => (
     <div className="flex gap-3">
-      <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full h-fit mt-0.5 bg-${color}-500/20 text-${color}-300 border border-${color}-500/30 min-w-fit`}>{term}</span>
+      <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full h-fit mt-0.5 border min-w-fit ${DEF_COLORS[color] || DEF_COLORS.indigo}`}>{term}</span>
       <p className="text-white/60 text-sm leading-relaxed">{children}</p>
     </div>
   );
@@ -1321,8 +1361,8 @@ function buildYearStats(year, data) {
   // CAGR annuel (pour 1 an = TWR, pour partiel = annualisé)
   let cagrYear = 0;
   if (yearSeries.length >= 2) {
-    const d1 = parseDateStr(yearSeries[0].date);
-    const d2 = parseDateStr(yearSeries[yearSeries.length-1].date);
+    const d1 = parseSaxoDate(yearSeries[0].date);
+    const d2 = parseSaxoDate(yearSeries[yearSeries.length-1].date);
     const nbJ = (d2 - d1) / (1000*60*60*24);
     if (nbJ > 0) cagrYear = (Math.pow(1 + twrAnnuel/100, 365/nbJ) - 1) * 100;
   } else {
@@ -1771,7 +1811,11 @@ export default function PortfolioAnalyzer() {
       ["Symbole", "Nom", "Achats", "Ventes", "P&L Net"],
       ...positions.map((p) => [p.sym, p.name, p.buys.toFixed(2), p.sells.toFixed(2), (p.plNet ?? p.realized).toFixed(2)]),
     ];
-    const blob = new Blob(["\uFEFF" + rows.map(r => r.join(";")).join("\n")], { type: "text/csv;charset=utf-8;" });
+    const csvQ = (v) => {
+      const s = String(v ?? "");
+      return s.includes(";") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g,'""')}"` : s;
+    };
+    const blob = new Blob(["\uFEFF" + rows.map(r => r.map(csvQ).join(";")).join("\n")], { type: "text/csv;charset=utf-8;" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `saxo_${new Date().toISOString().slice(0, 10)}.csv`;
