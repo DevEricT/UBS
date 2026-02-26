@@ -180,11 +180,12 @@ function processXLSX(workbook, filterCompte = "ALL", dateStart = null, dateEnd =
   // TWR officiel Saxo
   const perfRows = toRows(sheetPerf);
   const perfSeries = perfRows
-    .filter(r => r["Date"] && r["AccumulatedTimeWeightedTimeSeries"] != null)
+    .filter(r => r["Date"] && r["AccumulatedTimeWeightedTimeSeries"] != null && inRange(r["Date"]))
     .map(r => ({
       date: String(r["Date"]),
       twr: parseNum(r["AccumulatedTimeWeightedTimeSeries"]),
       valeur: parseNum(r["AccountValueTimeSeries"]),
+      dailyPct: parseNum(r["% daily returns"]),
     }));
   const lastPerf = perfSeries[perfSeries.length - 1];
   const firstPerf = perfSeries[0];
@@ -1348,12 +1349,18 @@ function buildYearStats(year, data) {
 
 function AnnualView({ data }) {
   const availableYears = data.years.map(y => y.period).sort();
-  const [yearA, setYearA] = useState(availableYears[availableYears.length - 1] || "");
-  const [yearB, setYearB] = useState(availableYears.length > 1 ? availableYears[availableYears.length - 2] : "");
+  const lastYear = availableYears[availableYears.length - 1] || "";
+  const prevYear = availableYears.length > 1 ? availableYears[availableYears.length - 2] : "";
+  const [yearA, setYearA] = useState(lastYear);
+  const [yearB, setYearB] = useState(prevYear);
   const [compareMode, setCompareMode] = useState(false);
 
-  const statsA = yearA ? buildYearStats(yearA, data) : null;
-  const statsB = compareMode && yearB ? buildYearStats(yearB, data) : null;
+  // Synchroniser yearA/yearB quand les années disponibles changent (filtre période)
+  const validYearA = availableYears.includes(yearA) ? yearA : lastYear;
+  const validYearB = availableYears.includes(yearB) ? yearB : prevYear;
+
+  const statsA = validYearA ? buildYearStats(validYearA, data) : null;
+  const statsB = compareMode && validYearB ? buildYearStats(validYearB, data) : null;
 
   const MONTHS = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Aoû","Sep","Oct","Nov","Déc"];
 
@@ -1410,13 +1417,21 @@ function AnnualView({ data }) {
     );
   };
 
+  if (!availableYears.length) return (
+    <div className="text-white/40 text-center py-10">Aucune donnée disponible pour la période sélectionnée.</div>
+  );
+
+  if (!statsA) return (
+    <div className="text-white/40 text-center py-10">Données insuffisantes pour afficher l'année {validYearA}. Essayez une période plus large.</div>
+  );
+
   return (
     <div className="space-y-5">
       {/* Sélecteurs */}
       <div className="flex flex-wrap items-center gap-4 bg-white/5 border border-white/10 rounded-2xl p-4">
         <div className="flex items-center gap-2">
           <span className="text-indigo-300 text-sm font-semibold">Année</span>
-          <select value={yearA} onChange={e => setYearA(e.target.value)}
+          <select value={validYearA} onChange={e => setYearA(e.target.value)}
             style={{ background: "#1e1b4b", color: "white" }} className="px-3 py-2 rounded-xl text-sm text-white border border-white/20 focus:outline-none focus:border-indigo-400">
             {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
@@ -1429,7 +1444,7 @@ function AnnualView({ data }) {
         {compareMode && (
           <div className="flex items-center gap-2">
             <span className="text-indigo-300 text-sm font-semibold">vs</span>
-            <select value={yearB} onChange={e => setYearB(e.target.value)}
+            <select value={validYearB} onChange={e => setYearB(e.target.value)}
               style={{ background: "#1e1b4b", color: "white" }} className="px-3 py-2 rounded-xl text-sm text-white border border-white/20 focus:outline-none focus:border-indigo-400">
               {availableYears.filter(y => y !== yearA).map(y => <option key={y} value={y}>{y}</option>)}
             </select>
@@ -1573,7 +1588,7 @@ function AnnualView({ data }) {
                     <td className="py-3 px-4 text-white">Total</td>
                     <td className={`py-3 px-4 text-right text-base ${statsA.twrAnnuel >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtPct(statsA.twrAnnuel)}</td>
                     {statsB && <td className={`py-3 px-4 text-right text-base ${statsB.twrAnnuel >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtPct(statsB.twrAnnuel)}</td>}
-                    {statsB && <td className={`py-3 px-4 text-right text-base ${(statsA.twrAnnuel - statsB.twrAnnuel) >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtPct(statsA.twrAnnuel - statsB.twrAnnuel)}</td>}
+                    {statsB && <td className={`py-3 px-4 text-right text-base ${statsB && (statsA.twrAnnuel - statsB.twrAnnuel) >= 0 ? "text-green-400" : "text-red-400"}`}>{statsB ? fmtPct(statsA.twrAnnuel - statsB.twrAnnuel) : "—"}</td>}
                   </tr>
                 </tbody>
               </table>
