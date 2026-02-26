@@ -2,7 +2,8 @@ import React, { useState, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area,
+  ComposedChart
 } from "recharts";
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
@@ -482,6 +483,7 @@ const TABS = [
   { id: "overview",    label: "📋 Vue d'ensemble" },
   { id: "performance", label: "📈 Performance" },
   { id: "annuel",      label: "📊 Vue Annuelle" },
+  { id: "temporelle",  label: "📉 Analyse Temporelle" },
   { id: "periodes",    label: "📆 Périodes" },
   { id: "positions",   label: "💼 Positions" },
   { id: "trends",      label: "📅 Trends" },
@@ -489,6 +491,263 @@ const TABS = [
 ];
 
 
+
+
+// ─── Composant Analyse Temporelle ────────────────────────────────────────────
+
+function TemporelleView({ data }) {
+  const series = data.perfSeriesFull || [];
+
+  // ── Calcul Drawdown ────────────────────────────────────────────────────────
+  let peak = -Infinity;
+  const serieWithDD = series.map(r => {
+    if (r.twr > peak) peak = r.twr;
+    const dd = peak > -Infinity ? r.twr - peak : 0;
+    return { ...r, drawdown: dd };
+  });
+
+  // Formater dates pour affichage
+  const parseDMY = (d) => {
+    const p = String(d).split("-");
+    return p.length === 3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`) : new Date(d);
+  };
+
+  const chartData = serieWithDD.map(r => {
+    const dt = parseDMY(r.date);
+    return {
+      date: r.date,
+      label: dt.toLocaleDateString("fr-FR", { day:"2-digit", month:"short" }),
+      twr: parseFloat(r.twr.toFixed(3)),
+      drawdown: parseFloat(r.drawdown.toFixed(3)),
+      valeur: r.valeur,
+      daily: r.dailyPct ? parseFloat((r.dailyPct * 100).toFixed(3)) : 0,
+    };
+  });
+
+  // ── Statistiques Drawdown ──────────────────────────────────────────────────
+  const maxDD = Math.min(...serieWithDD.map(r => r.drawdown));
+  const maxDDDate = serieWithDD.find(r => r.drawdown === maxDD)?.date || "";
+  
+  // Calculer les épisodes de drawdown
+  const episodes = [];
+  let inDD = false, ddStart = null, ddPeak = 0, ddDepth = 0;
+  serieWithDD.forEach((r, i) => {
+    if (r.drawdown < -0.01 && !inDD) {
+      inDD = true; ddStart = r.date; ddPeak = 0; ddDepth = r.drawdown;
+    } else if (r.drawdown < -0.01 && inDD) {
+      if (r.drawdown < ddDepth) ddDepth = r.drawdown;
+    } else if (r.drawdown >= -0.01 && inDD) {
+      inDD = false;
+      episodes.push({ start: ddStart, end: r.date, depth: ddDepth });
+    }
+  });
+  if (inDD) episodes.push({ start: ddStart, end: serieWithDD[serieWithDD.length-1]?.date, depth: ddDepth });
+
+  // ── Heatmap calendrier ─────────────────────────────────────────────────────
+  // Regrouper par mois → semaines → jours
+  const byDate = {};
+  series.forEach(r => {
+    const dt = parseDMY(r.date);
+    const key = dt.toISOString().slice(0,10);
+    byDate[key] = r.dailyPct ? r.dailyPct * 100 : 0;
+  });
+
+  // Construire la grille : tous les jours de la période
+  const allDays = [];
+  if (series.length > 0) {
+    const d1 = parseDMY(series[0].date);
+    const d2 = parseDMY(series[series.length-1].date);
+    // Reculer au lundi de la semaine de d1
+    const start = new Date(d1);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    const end = new Date(d2);
+    end.setDate(end.getDate() + (7 - ((end.getDay() + 6) % 7)) % 7);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+      const key = d.toISOString().slice(0,10);
+      allDays.push({
+        date: new Date(d),
+        key,
+        val: byDate[key] ?? null,
+        weekday: (d.getDay() + 6) % 7, // 0=lundi
+      });
+    }
+  }
+
+  // Regrouper par semaines
+  const weeks = [];
+  for (let i = 0; i < allDays.length; i += 7) {
+    weeks.push(allDays.slice(i, i+7));
+  }
+
+  // Regrouper par mois pour les labels
+  const monthLabels = [];
+  weeks.forEach((week, wi) => {
+    const firstReal = week.find(d => d.val !== null);
+    if (firstReal) {
+      const m = firstReal.date.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+      const prev = monthLabels[monthLabels.length-1];
+      if (!prev || prev.label !== m) {
+        monthLabels.push({ label: m, col: wi });
+      }
+    }
+  });
+
+  // Couleur heatmap
+  const heatColor = (v) => {
+    if (v === null) return "rgba(255,255,255,0.04)";
+    if (v > 2)    return "#059669";
+    if (v > 1)    return "#10b981";
+    if (v > 0.3)  return "#34d399";
+    if (v > 0)    return "#6ee7b7";
+    if (v === 0)  return "rgba(255,255,255,0.08)";
+    if (v > -0.3) return "#fca5a5";
+    if (v > -1)   return "#f87171";
+    if (v > -2)   return "#ef4444";
+    return "#b91c1c";
+  };
+
+  // ── Statistiques rapides ──────────────────────────────────────────────────
+  const dailyVals = series.map(r => r.dailyPct ? r.dailyPct * 100 : 0).filter(v => v !== 0);
+  const posJours = dailyVals.filter(v => v > 0).length;
+  const negJours = dailyVals.filter(v => v < 0).length;
+  const bestDay  = dailyVals.length ? Math.max(...dailyVals) : 0;
+  const worstDay = dailyVals.length ? Math.min(...dailyVals) : 0;
+  const bestDayDate  = series.find(r => r.dailyPct && Math.abs(r.dailyPct*100 - bestDay)  < 0.001)?.date || "";
+  const worstDayDate = series.find(r => r.dailyPct && Math.abs(r.dailyPct*100 - worstDay) < 0.001)?.date || "";
+
+  const JOURS = ["L","M","M","J","V","S","D"];
+
+  return (
+    <div className="space-y-5">
+
+      {/* ── KPIs rapides ── */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KpiCardSm label="Drawdown Max" value={maxDD.toFixed(2) + " %"} icon="📉" color="red"
+          tooltip={"Pire perte depuis un sommet sur toute la période. Date : " + maxDDDate} />
+        <KpiCardSm label="Épisodes DD" value={episodes.length} icon="⚠️" color="amber"
+          tooltip="Nombre de périodes de drawdown (baisse continue depuis un sommet)." />
+        <KpiCardSm label="Jours positifs" value={posJours + " / " + (posJours+negJours)} icon="✅" color="green"
+          tooltip={"Jours avec rendement positif vs total jours tradés. Hit ratio : " + (posJours+negJours > 0 ? ((posJours/(posJours+negJours))*100).toFixed(1)+"%" : "N/A")} />
+        <KpiCardSm label="Meilleur jour" value={"+" + bestDay.toFixed(2) + " %"} icon="🚀" color="green"
+          tooltip={"Meilleure journée de la période : " + bestDayDate} />
+        <KpiCardSm label="Pire jour" value={worstDay.toFixed(2) + " %"} icon="💥" color="red"
+          tooltip={"Pire journée de la période : " + worstDayDate} />
+      </div>
+
+      {/* ── Graphique TWR + Drawdown ── */}
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+        <h3 className="text-white font-semibold mb-1 flex items-center text-sm uppercase tracking-widest">
+          TWR Cumulé & Drawdown
+          <InfoTooltip text="Courbe bleue = TWR cumulé officiel. Zone rouge = perte depuis le dernier sommet (drawdown). Plus la zone rouge est profonde et longue, plus le portefeuille a souffert." />
+        </h3>
+        <p className="text-white/40 text-xs mb-4">{chartData.length} points journaliers · axe gauche = TWR% · axe droit = Drawdown%</p>
+        <ResponsiveContainer width="100%" height={320}>
+          <ComposedChart data={chartData} margin={{ left: 10, right: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis dataKey="label" tick={{ fill:"#a5b4fc", fontSize:9 }} interval={Math.floor(chartData.length/10)} />
+            <YAxis yAxisId="twr" tick={{ fill:"#a5b4fc", fontSize:10 }} tickFormatter={v => v.toFixed(1)+"%"} />
+            <YAxis yAxisId="dd" orientation="right" tick={{ fill:"#fca5a5", fontSize:10 }} tickFormatter={v => v.toFixed(1)+"%"} />
+            <Tooltip
+              contentStyle={{ background:"#1e1b4b", border:"1px solid #4338ca", borderRadius:8, color:"#fff", fontSize:11 }}
+              itemStyle={{ color:"#fff" }} labelStyle={{ color:"#fff" }}
+              formatter={(v, name) => [v.toFixed(3)+"%", name]}
+            />
+            <Legend wrapperStyle={{ color:"#a5b4fc", fontSize:12 }} />
+            <Area yAxisId="dd" type="monotone" dataKey="drawdown" name="Drawdown" fill="rgba(239,68,68,0.25)" stroke="#ef4444" strokeWidth={1} dot={false} />
+            <Line yAxisId="twr" type="monotone" dataKey="twr" name="TWR%" stroke="#6366f1" strokeWidth={2} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── Heatmap calendrier ── */}
+      <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+        <h3 className="text-white font-semibold mb-1 flex items-center text-sm uppercase tracking-widest">
+          Heatmap des Performances Journalières
+          <InfoTooltip text="Chaque case = un jour de bourse. Vert = jour positif (plus foncé = plus fort), rouge = jour négatif. Gris = weekend/férié/pas de données." />
+        </h3>
+        <div className="mb-3 flex gap-3 items-center flex-wrap">
+          {[["#b91c1c","< -2%"],["#ef4444","-1 à -2%"],["#f87171","-0.3 à -1%"],["#fca5a5","0 à -0.3%"],["#6ee7b7","0 à +0.3%"],["#34d399","+0.3 à +1%"],["#10b981","+1 à +2%"],["#059669","> +2%"]].map(([c,l]) => (
+            <span key={l} className="flex items-center gap-1 text-xs text-white/60">
+              <span style={{ width:10,height:10,background:c,borderRadius:2,display:"inline-block" }} />{l}
+            </span>
+          ))}
+        </div>
+        <div className="overflow-x-auto pb-2">
+          <div style={{ display:"grid", gridTemplateColumns:`24px repeat(${weeks.length}, 14px)`, gap:2, alignItems:"start" }}>
+            {/* Jours de la semaine */}
+            <div />
+            {weeks.map((_, wi) => {
+              const ml = monthLabels.find(m => m.col === wi);
+              return <div key={wi} style={{ fontSize:9, color:"#818cf8", textAlign:"center", height:14, lineHeight:"14px", whiteSpace:"nowrap", overflow:"visible" }}>{ml ? ml.label : ""}</div>;
+            })}
+            {/* Grille */}
+            {JOURS.map((j, di) => (
+              <React.Fragment key={di}>
+                <div style={{ fontSize:9, color:"#a5b4fc", textAlign:"right", paddingRight:4, lineHeight:"14px", marginTop: di === 0 ? 2 : 0 }}>{di % 2 === 0 ? j : ""}</div>
+                {weeks.map((week, wi) => {
+                  const day = week[di];
+                  if (!day) return <div key={wi} />;
+                  const isWeekend = day.weekday >= 5;
+                  return (
+                    <div
+                      key={wi}
+                      title={`${day.key} : ${day.val !== null ? day.val.toFixed(3)+"%" : "—"}`}
+                      style={{
+                        width:13, height:13, borderRadius:2,
+                        background: isWeekend ? "rgba(255,255,255,0.02)" : heatColor(day.val),
+                        opacity: isWeekend ? 0.3 : 1,
+                        cursor: day.val !== null ? "default" : "default",
+                      }}
+                    />
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Épisodes de Drawdown ── */}
+      {episodes.length > 0 && (
+        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-white/10 text-indigo-300 text-sm flex items-center gap-1">
+            Épisodes de Drawdown
+            <InfoTooltip text="Chaque ligne = une période de baisse continue depuis un sommet. Depth = profondeur maximale du drawdown pendant cet épisode." />
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-white/5">
+                <th className="text-left text-indigo-300 py-3 px-4 text-xs uppercase">#</th>
+                <th className="text-left text-indigo-300 py-3 px-4 text-xs uppercase">Début</th>
+                <th className="text-left text-indigo-300 py-3 px-4 text-xs uppercase">Fin</th>
+                <th className="text-right text-indigo-300 py-3 px-4 text-xs uppercase">Durée</th>
+                <th className="text-right text-indigo-300 py-3 px-4 text-xs uppercase">Profondeur</th>
+              </tr>
+            </thead>
+            <tbody>
+              {episodes.sort((a,b) => a.depth - b.depth).slice(0,10).map((ep, i) => {
+                const d1 = parseDMY(ep.start), d2 = parseDMY(ep.end);
+                const dur = Math.round((d2-d1)/(1000*60*60*24));
+                return (
+                  <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td className="py-2.5 px-4 text-white/50">{i+1}</td>
+                    <td className="py-2.5 px-4 text-white">{ep.start}</td>
+                    <td className="py-2.5 px-4 text-white">{ep.end}</td>
+                    <td className="py-2.5 px-4 text-right text-indigo-300">{dur}j</td>
+                    <td className={`py-2.5 px-4 text-right font-bold ${ep.depth < -3 ? "text-red-400" : ep.depth < -1 ? "text-amber-400" : "text-yellow-300"}`}>
+                      {ep.depth.toFixed(2)} %
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+    </div>
+  );
+}
 
 // ─── Composant PositionsTable avec tri ───────────────────────────────────────
 
@@ -1249,6 +1508,11 @@ export default function PortfolioAnalyzer() {
             {/* Vue Annuelle */}
             {tab === "annuel" && (
               <AnnualView data={data} />
+            )}
+
+            {/* Analyse Temporelle */}
+            {tab === "temporelle" && (
+              <TemporelleView data={data} />
             )}
 
             {/* Périodes */}
