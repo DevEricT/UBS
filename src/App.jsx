@@ -1407,6 +1407,16 @@ export default function PortfolioAnalyzer() {
                 )}
               </div>
 
+              {/* Note TWR sous-période */}
+              {(dateStart !== (data.dateRange?.min || "") || dateEnd !== (data.dateRange?.max || "")) && (
+                <div className="flex items-start gap-1.5 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-1.5 max-w-sm">
+                  <span className="text-amber-400 text-xs mt-0.5 shrink-0">⚠️</span>
+                  <span className="text-amber-300/80 text-xs leading-relaxed">
+                    Tous les onglets sont recalculés sur cette période. Le TWR affiché est la variation du TWR Saxo entre le 1er et le dernier point — il peut différer du TWR Saxo officiel pour la même période car Saxo le recalcule depuis zéro.
+                  </span>
+                </div>
+              )}
+
               <button onClick={exportCSV} className="px-4 py-2 rounded-xl text-sm font-semibold text-white border border-white/20 hover:bg-white/10 transition-all">⬇️ CSV</button>
               <button onClick={exportPDF} className="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-lg">📄 PDF</button>
               <button onClick={() => { setData(null); setWorkbook(null); setFileName(""); }} className="px-3 py-2 rounded-xl text-xs text-white/40 hover:text-white/70 hover:bg-white/5 transition-all">🔄</button>
