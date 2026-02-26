@@ -1478,10 +1478,18 @@ export default function PortfolioAnalyzer() {
                     <div className="space-y-2">
                       {data.positions.slice(0, 10).map((p, i) => {
                         const pl = p.plNet ?? p.realized;
+                        const plpct = p.buys > 0 ? (pl / p.buys * 100) : null;
                         return (
-                          <div key={i} className="flex justify-between items-center py-1.5 border-b border-white/5">
-                            <span className="text-indigo-200 font-mono text-sm">{p.sym}</span>
-                            <span className={`font-semibold text-sm ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(pl)}</span>
+                          <div key={i} className="flex items-center justify-between py-1.5 border-b border-white/5 gap-2">
+                            <span className="text-xs text-white/40 w-4 shrink-0">{i+1}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-indigo-200 font-mono text-xs font-semibold truncate">{p.sym}</div>
+                              <div className="text-white/40 text-xs truncate">{p.name}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className={`font-semibold text-sm ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(pl)}</div>
+                              {plpct != null && <div className={`text-xs ${pl >= 0 ? "text-green-400/70" : "text-red-400/70"}`}>+{plpct.toFixed(1)} %</div>}
+                            </div>
                           </div>
                         );
                       })}
