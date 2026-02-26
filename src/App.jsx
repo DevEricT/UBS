@@ -1074,7 +1074,7 @@ function AnnualView({ data }) {
               tooltip="Total des dépôts entrants sur l’annee." />
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
             <StatBlock label="Volatilité Annualisée" valueA={statsA.volatility} valueB={statsB?.volatility} format="pct2"
               tooltip="Écart-type des rendements journaliers × √252. | Mesure l\’amplitude des fluctuations. < 10% = faible, 10-20% = modérée, > 20% = élevée." />
             <StatBlock label="Ratio Sharpe" valueA={statsA.sharpe} valueB={statsB?.sharpe} format="ratio"
@@ -1328,7 +1328,7 @@ export default function PortfolioAnalyzer() {
             {/* Overview */}
             {tab === "overview" && (
               <div className="space-y-5">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                   <KpiCard label="Valeur Totale" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur totale du portefeuille au dernier jour calculé par (onglet Performance du fichier)." />
                   <KpiCard label="Capital Net Investi" value={fmtEur(data.kpis.netDeposits)} icon="💶" color="indigo" tooltip="Dépôts cumulés moins les retraits. Représente le capital réellement engagé depuis l’ouverture du compte." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} sub={fmtPct(data.kpis.perfPct)} icon="📈" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé + dividendes + intérêts – frais totaux. Le % est calculé sur le capital net investi." />
@@ -1336,13 +1336,13 @@ export default function PortfolioAnalyzer() {
                   <KpiCard label="CAGR (annualisé)" value={fmtPct(data.kpis.cagr)} icon="📐" color={data.kpis.cagr >= 0 ? "teal" : "red"} tooltip="Compound Annual Growth Rate : TWR annualisé sur la durée réelle. Formule : (1 + TWR)^(365/nbJours) - 1. Permet de comparer des périodes de durées différentes." />
                   <KpiCard label="IRR / TRI" value={data.kpis.irr != null ? fmtPct(data.kpis.irr) : "N/A"} icon="💹" color={data.kpis.irr != null && data.kpis.irr >= 0 ? "green" : "red"} tooltip="Internal Rate of Return (Taux de Rendement Interne) : rendement réel du capital investi tenant compte des dates exactes de chaque dépôt/retrait. Métrique clé en gestion patrimoniale." />
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                   <KpiCard label="Dépôts" value={fmtEur(data.kpis.deposits)} icon="⬆️" color="indigo" tooltip="Total des virements entrants (Cash Amount positifs) sur la période analysée." />
                   <KpiCard label="Retraits" value={fmtEur(data.kpis.withdrawals)} icon="⬇️" color="pink" tooltip="Total des virements sortants sur la période analysée." />
                   <KpiCard label="Dividendes" value={fmtEur(data.kpis.dividends)} icon="🌱" color="green" tooltip="Dividendes en espèces versés par les actions détenues (Corporate Actions - Cash Dividends)." />
                   <KpiCard label="Intérêts" value={fmtEur(data.kpis.interest)} icon="⚡" color="teal" tooltip="Intérêts créditeurs reçus sur les liquidités du compte (Client Interest)." />
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                   <KpiCard label="Frais Totaux" value={"-" + fmtEur(data.kpis.totalFees)} icon="🏦" color="amber" tooltip="Somme de toutes les charges : commissions, taxe FFT, frais de change, taxes sociales." />
                   <KpiCard label="Commissions" value={"-" + fmtEur(data.kpis.fees.commission)} sub={data.kpis.totalVolume > 0 ? (data.kpis.fees.commission / data.kpis.totalVolume * 100).toFixed(3) + " % du volume traité" : ""} icon="📋" color="amber" tooltip="Frais de courtage (Commission) sur chaque ordre. % = commissions / (achats + ventes) : taux effectif moyen sur le volume total traité." />
                   <KpiCard label="Taxes FFT" value={"-" + fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="Taxe sur les Transactions Financières française (0,3%) applicable aux achats d’actions françaises de plus de 1 milliard de capitalisation." />
@@ -1371,7 +1371,7 @@ export default function PortfolioAnalyzer() {
             {/* Performance */}
             {tab === "performance" && (
               <div className="space-y-5">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <KpiCard label={`TWR (${data.broker})`} value={fmtPct(data.kpis.twr)} icon="🎯" color="teal" sub="Time-Weighted Return" tooltip="Rendement pondéré dans le temps : élimine l’effet des dépôts/retraits pour mesurer la pure performance de la gestion. Standard CFA/GIPS." />
                   <KpiCard label="Valeur Portefeuille" value={fmtEur(data.kpis.valeurTotale)} icon="💎" color="violet" tooltip="Valeur de marché totale du portefeuille au dernier jour disponible dans le fichier." />
                   <KpiCard label="Résultat Net" value={fmtEur(data.kpis.netResult)} icon="📊" color={data.kpis.netResult >= 0 ? "green" : "red"} tooltip="P&L réalisé (onglet B/P Saxo) + dividendes + intérêts – frais totaux." />
@@ -1492,10 +1492,18 @@ export default function PortfolioAnalyzer() {
                     <div className="space-y-2">
                       {[...data.positions].sort((a, b) => (a.plNet ?? a.realized) - (b.plNet ?? b.realized)).slice(0, 10).map((p, i) => {
                         const pl = p.plNet ?? p.realized;
+                        const plpct = p.buys > 0 ? (pl / p.buys * 100) : null;
                         return (
-                          <div key={i} className="flex justify-between items-center py-1.5 border-b border-white/5">
-                            <span className="text-indigo-200 font-mono text-sm">{p.sym}</span>
-                            <span className={`font-semibold text-sm ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(pl)}</span>
+                          <div key={i} className="flex items-center justify-between py-1.5 border-b border-white/5 gap-2">
+                            <span className="text-xs text-white/40 w-4 shrink-0">{i+1}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-indigo-200 font-mono text-xs font-semibold truncate">{p.sym}</div>
+                              <div className="text-white/40 text-xs truncate">{p.name}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className={`font-semibold text-sm ${pl >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtEur(pl)}</div>
+                              {plpct != null && <div className={`text-xs ${pl >= 0 ? "text-green-400/70" : "text-red-400/70"}`}>{pl >= 0 ? "+" : ""}{plpct.toFixed(1)} %</div>}
+                            </div>
                           </div>
                         );
                       })}
@@ -1692,7 +1700,7 @@ export default function PortfolioAnalyzer() {
             {/* Fees */}
             {tab === "fees" && (
               <div className="space-y-5">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
                   <KpiCard label="Total Frais" value={"-"+fmtEur(data.kpis.totalFees)} icon="💸" color="red" tooltip="Somme de toutes les charges prélevées : courtage, FFT, frais de change, taxes sociales et retenues à la source." />
                   <KpiCard label="Commissions" value={"-"+fmtEur(data.kpis.fees.commission)} sub={data.kpis.totalVolume > 0 ? (data.kpis.fees.commission / data.kpis.totalVolume * 100).toFixed(3) + " % du volume traité" : ""} icon="🏦" color="amber" tooltip="Frais de courtage (Commission) sur chaque ordre. % = commissions / (achats + ventes) : taux effectif moyen sur le volume total traité." />
                   <KpiCard label="Taxes FFT" value={"-"+fmtEur(data.kpis.fees.tax)} icon="🏛️" color="amber" tooltip="French Financial Transaction Tax (0,3%) sur les achats d’actions françaises de plus de 1 Md€ de capitalisation." />
@@ -1710,7 +1718,7 @@ export default function PortfolioAnalyzer() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <KpiCard label="Frais / Volume total"
                     value={data.kpis.totalVolume > 0 ? ((data.kpis.totalFees / data.kpis.totalVolume) * 100).toFixed(3) + " %" : "N/A"}
                     icon="📊" color="amber"
