@@ -1,45 +1,45 @@
-# 📊 Saxo Analyzer
+# UBS Portfolio Analyzer
 
-Application React pour analyser les exports de portefeuille Saxo Bank.
+Analyseur multi-format pour exports UBS — fork du Saxo Portfolio Analyzer.
 
-## Fichier attendu
+## Formats supportés
 
-`AggregatedAmounts_XXXXXXXX_YYYY-MM-DD_YYYY-MM-DD.xlsx`
+| Format | Description | Status |
+|--------|-------------|--------|
+| `KEY4_EXCEL` | UBS Key4 / E-banking (Transactions + Positions) | ✅ Supporté |
+| `SIMPLE_CSV` | CSV mono-feuille | ✅ Supporté |
+| `ADVISOR_EXCEL` | Export conseiller UBS (Portfolio/Cash/Movements) | 🔜 À implémenter |
 
-## Fonctionnalités
+## Architecture
 
-- 📋 **Vue d'ensemble** — KPIs : valeur totale, capital investi, résultat net, TWR officiel Saxo
-- 📈 **Performance** — Courbes TWR et valeur du portefeuille, Top/Flop 10 positions
-- 💼 **Positions** — Tableau complet avec P&L Net (source onglet B/P Saxo)
-- 📅 **Trends** — Graphiques mensuels : dépôts, achats/ventes, frais, dividendes
-- 💰 **Frais** — Détail commissions, taxes FFT, exchange fees
-- 🔽 **Export CSV** — KPIs + toutes les positions
-- 📄 **Export PDF** — Rapport professionnel imprimable
+```
+processUBS()
+  └── detectUBSFormat()      → détecte le template parmi les feuilles
+  └── parseKey4()            → parse Key4/CSV avec détection dynamique des colonnes
+  └── parseAdvisor()         → parse format conseiller (TODO)
+  └── buildEmptyResult()     → fallback format inconnu
+```
 
-## Filtres
-
-Sélecteur de compte pour analyser séparément :
-- Compte Principal EUR
-- PEA
-- PEA-PME
-- Autres comptes
-
-## Installation
+## Démarrage
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Build
+## Ajouter un nouveau format UBS
 
-```bash
-npm run build
-```
+1. Uploader le fichier → regarder les feuilles détectées (onglet Config)
+2. Ajouter une condition dans `detectUBSFormat()`
+3. Créer un parser `parseXxx()` sur le modèle de `parseKey4()`
+4. Mapper les colonnes via `findCol()` + `UBS_KEY4_COLS` ou un nouveau dict
 
-## Tech
+## Colonnes UBS connues (à compléter avec vrai fichier)
 
-- React 18 + Vite
-- Recharts (graphiques)
-- SheetJS/xlsx (lecture Excel)
-- Tailwind CSS
+| Concept | Candidats testés |
+|---------|-----------------|
+| Date | "Date", "Date de valeur", "Booking date", "Date comptable" |
+| Montant | "Montant", "Amount", "CHF", "EUR" |
+| Type | "Type", "Category", "Catégorie" |
+| Titre | "Titre", "Security", "ISIN", "Valeur" |
+| Compte | "Compte", "Account", "Konto" |
