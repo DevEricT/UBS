@@ -1327,8 +1327,57 @@ export default function PortfolioAnalyzer() {
               </select>
 
               {/* ── Filtre période ── */}
-              <div className="flex items-center gap-1.5 bg-white/5 border border-white/15 rounded-xl px-3 py-1.5">
+              <div className="flex items-center gap-1.5 bg-white/5 border border-white/15 rounded-xl px-3 py-1.5 flex-wrap">
                 <span className="text-white/40 text-xs">📅</span>
+
+                {/* Menu preset */}
+                {(() => {
+                  const rangeMin = data.dateRange?.min || "";
+                  const rangeMax = data.dateRange?.max || "";
+                  const availYears = [...new Set([rangeMin, rangeMax].map(d => d.slice(0,4)))].sort();
+                  const allYears = [];
+                  const y0 = parseInt(rangeMin.slice(0,4));
+                  const y1 = parseInt(rangeMax.slice(0,4));
+                  for (let y = y0; y <= y1; y++) allYears.push(y);
+
+                  const presets = [
+                    { label: "Tout", ds: rangeMin, de: rangeMax },
+                    ...allYears.map(y => ({ label: String(y), ds: `${y}-01-01`, de: `${y}-12-31` })),
+                    ...allYears.flatMap(y => [
+                      { label: `T1 ${y}`, ds: `${y}-01-01`, de: `${y}-03-31` },
+                      { label: `T2 ${y}`, ds: `${y}-04-01`, de: `${y}-06-30` },
+                      { label: `T3 ${y}`, ds: `${y}-07-01`, de: `${y}-09-30` },
+                      { label: `T4 ${y}`, ds: `${y}-10-01`, de: `${y}-12-31` },
+                    ]),
+                    { label: "6 mois", ds: (() => { const d = new Date(rangeMax); d.setMonth(d.getMonth()-6); return d.toISOString().slice(0,10); })(), de: rangeMax },
+                    { label: "3 mois", ds: (() => { const d = new Date(rangeMax); d.setMonth(d.getMonth()-3); return d.toISOString().slice(0,10); })(), de: rangeMax },
+                    { label: "1 mois", ds: (() => { const d = new Date(rangeMax); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,10); })(), de: rangeMax },
+                  ];
+
+                  const currentPreset = presets.find(p => p.ds === dateStart && p.de === dateEnd);
+
+                  return (
+                    <select
+                      value={currentPreset?.label || ""}
+                      onChange={e => {
+                        const p = presets.find(x => x.label === e.target.value);
+                        if (!p) return;
+                        const ds = p.ds < rangeMin ? rangeMin : p.ds;
+                        const de = p.de > rangeMax ? rangeMax : p.de;
+                        setDateStart(ds); setDateEnd(de);
+                        handleDateFilter(ds, de);
+                      }}
+                      style={{ background: "#1e1b4b", color: "white", colorScheme: "dark" }}
+                      className="text-xs border border-white/20 rounded-lg px-2 py-1 outline-none focus:border-indigo-400"
+                    >
+                      <option value="" style={{ background: "#1e1b4b" }}>Période…</option>
+                      {presets.map(p => (
+                        <option key={p.label} value={p.label} style={{ background: "#1e1b4b" }}>{p.label}</option>
+                      ))}
+                    </select>
+                  );
+                })()}
+
                 <input
                   type="date"
                   value={dateStart}
