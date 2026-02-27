@@ -123,22 +123,107 @@ const parsePositions = (buffer, filename) => {
 // CALCULS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CALCULS DE PERFORMANCE — Modified Dietz + détection des flux de capitaux
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Seuils de détection d'un flux de capital (apport ou retrait)
+const FLUX_SEUIL_PCT = 0.20;   // > 20% de variation mensuelle
+const FLUX_SEUIL_ABS = 80000;  // ET > 80 000€ en valeur absolue
+
+// Détecter les flux de capital sur une transition prev→curr
+// Retourne { fluxTotal, fluxParCompte, isEvent }
+const detecterFlux = (prev, curr) => {
+  const fluxParCompte = {};
+  let fluxTotal = 0;
+
+  for (const c of COMPTES_LIST) {
+    const vPrev = prev[c.id] || 0;
+    const vCurr = curr[c.id] || 0;
+    const variation = vCurr - vPrev;
+
+    // Cas 1 : nouveau compte apparaît → apport = valeur totale
+    if (vPrev === 0 && vCurr > FLUX_SEUIL_ABS) {
+      fluxParCompte[c.id] = vCurr;
+      fluxTotal += vCurr;
+    }
+    // Cas 2 : compte disparaît → retrait total
+    else if (vPrev > FLUX_SEUIL_ABS && vCurr === 0) {
+      fluxParCompte[c.id] = -vPrev;
+      fluxTotal -= vPrev;
+    }
+    // Cas 3 : variation importante → probable apport partiel
+    else if (vPrev > 0 && Math.abs(variation / vPrev) > FLUX_SEUIL_PCT && Math.abs(variation) > FLUX_SEUIL_ABS) {
+      // Estimation conservatrice : on soustrait ce qui dépasse ±20% de rendement organique max
+      const rendementMax = vPrev * FLUX_SEUIL_PCT;
+      const fluxEstime = variation > 0
+        ? Math.max(0, variation - rendementMax)
+        : Math.min(0, variation + rendementMax);
+      fluxParCompte[c.id] = fluxEstime;
+      fluxTotal += fluxEstime;
+    } else {
+      fluxParCompte[c.id] = 0;
+    }
+  }
+
+  return { fluxTotal, fluxParCompte, isEvent: Math.abs(fluxTotal) > FLUX_SEUIL_ABS };
+};
+
+// Modified Dietz : r = (V_fin - V_debut - CF) / (V_debut + 0.5 * CF)
+// Hypothèse : les flux arrivent en milieu de période
+const modifiedDietz = (vDebut, vFin, flux) => {
+  const denominateur = vDebut + 0.5 * flux;
+  if (denominateur <= 0) return 0;
+  return (vFin - vDebut - flux) / denominateur;
+};
+
 const buildTimeline = (syntheses) => {
   const byDate = {};
   for (const s of syntheses) byDate[s.date] = s;
   const dates = Object.keys(byDate).sort();
+
   const points = dates.map(date => {
     const s = byDate[date];
-    return { date, label:ymdToLabel(date), year:ymdYear(date), total:s.total, liquidites:s.liquidites,
-      ...Object.fromEntries(COMPTES_LIST.map(c=>[c.id, s.comptes[c.id]||0])) };
+    return {
+      date, label:ymdToLabel(date), year:ymdYear(date),
+      total:s.total, liquidites:s.liquidites,
+      ...Object.fromEntries(COMPTES_LIST.map(c=>[c.id, s.comptes[c.id]||0])),
+    };
   });
-  for (let i=1;i<points.length;i++) {
-    const prev=points[i-1].total, curr=points[i].total;
-    points[i].variation = curr-prev;
-    points[i].perfMois  = prev>0?((curr-prev)/prev)*100:0;
+
+  // Calcul variation brute + détection flux + Modified Dietz
+  let twrCumul = 1.0; // facteur TWR cumulé
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i-1], curr = points[i];
+    const { fluxTotal, fluxParCompte, isEvent } = detecterFlux(prev, curr);
+
+    curr.variation    = curr.total - prev.total;
+    curr.flux         = fluxTotal;
+    curr.fluxParCompte = fluxParCompte;
+    curr.isFluxEvent  = isEvent;
+
+    // Rendement mensuel corrigé des flux (Modified Dietz)
+    const rMois = modifiedDietz(prev.total, curr.total, fluxTotal);
+    curr.perfMoisTWR = rMois * 100;
+
+    // Rendement brut (naïf, sans correction flux) — pour info
+    curr.perfMoisBrut = prev.total > 0 ? ((curr.total - prev.total) / prev.total) * 100 : 0;
+
+    // TWR cumulé = produit des (1 + r_i) — exclut mécaniquement l'effet des flux
+    twrCumul *= (1 + rMois);
+    curr.perfCumTWR = (twrCumul - 1) * 100;
   }
-  if (points.length) { points[0].variation=0; points[0].perfMois=0; }
-  if (points.length) { const base=points[0].total; for (const p of points) p.perfCum=base>0?((p.total-base)/base)*100:0; }
+
+  if (points.length) {
+    points[0].variation = 0; points[0].flux = 0;
+    points[0].perfMoisTWR = 0; points[0].perfMoisBrut = 0;
+    points[0].perfCumTWR = 0; points[0].isFluxEvent = false;
+    points[0].fluxParCompte = Object.fromEntries(COMPTES_LIST.map(c=>[c.id,0]));
+  }
+
+  // Alias perfCum = perfCumTWR pour compatibilité affichage
+  for (const p of points) { p.perfCum = p.perfCumTWR ?? 0; p.perfMois = p.perfMoisTWR ?? 0; }
+
   return points;
 };
 
@@ -146,23 +231,53 @@ const buildAnnualPerf = (timeline) => {
   const byYear = {};
   for (const p of timeline) { if (!byYear[p.year]) byYear[p.year]=[]; byYear[p.year].push(p); }
   return Object.keys(byYear).sort().map(year => {
-    const pts=byYear[year], first=pts[0], last=pts[pts.length-1];
+    const pts = byYear[year], first = pts[0], last = pts[pts.length-1];
+
+    // TWR annuel = produit des (1 + perfMoisTWR/100) sur l'année
+    let twrAnnuel = 1.0;
+    for (const p of pts) { if (p.perfMoisTWR != null) twrAnnuel *= (1 + p.perfMoisTWR / 100); }
+    const pctTWR = (twrAnnuel - 1) * 100;
+
+    // Flux totaux de l'année
+    const fluxAnnuel = pts.reduce((s,p) => s + (p.flux||0), 0);
+
     const comptePerf = {};
     for (const c of COMPTES_LIST) {
-      const vD=first[c.id]||0, vF=last[c.id]||0;
-      comptePerf[c.id] = { debut:vD, fin:vF, variation:vF-vD, pct:vD>0?((vF-vD)/vD)*100:null };
+      const vD = first[c.id]||0, vF = last[c.id]||0;
+      const fluxC = pts.reduce((s,p) => s + (p.fluxParCompte?.[c.id]||0), 0);
+      const rC = modifiedDietz(vD, vF, fluxC);
+      comptePerf[c.id] = { debut:vD, fin:vF, variation:vF-vD, flux:fluxC, pct: rC*100 };
     }
-    return { year, debut:first.total, fin:last.total, variation:last.total-first.total,
-      pct:first.total>0?((last.total-first.total)/first.total)*100:null, snapshots:pts.length, comptePerf };
+
+    return {
+      year, debut:first.total, fin:last.total,
+      variation: last.total - first.total,
+      fluxAnnuel, pct: pctTWR,
+      snapshots: pts.length, comptePerf,
+    };
   });
 };
 
-const buildCompteTimeline = (timeline, compteId) =>
-  timeline.map(p=>({ date:p.date, label:p.label, year:p.year, total:p[compteId]||0 }))
-  .filter(p=>p.total>0)
-  .map((p,i,arr) => ({ ...p, variation:i>0?p.total-arr[i-1].total:0,
-    perfMois:i>0&&arr[i-1].total>0?((p.total-arr[i-1].total)/arr[i-1].total)*100:0,
-    perfCum:arr[0].total>0?((p.total-arr[0].total)/arr[0].total)*100:0 }));
+const buildCompteTimeline = (timeline, compteId) => {
+  const pts = timeline
+    .map(p => ({ date:p.date, label:p.label, year:p.year, total:p[compteId]||0,
+      flux: p.fluxParCompte?.[compteId]||0, isFluxEvent: p.isFluxEvent }))
+    .filter(p => p.total > 0);
+
+  let twrCumul = 1.0;
+  return pts.map((p, i, arr) => {
+    if (i === 0) return { ...p, variation:0, perfMois:0, perfCum:0, twrCumul:0 };
+    const prev = arr[i-1];
+    const r = modifiedDietz(prev.total, p.total, p.flux);
+    twrCumul *= (1 + r);
+    return {
+      ...p,
+      variation: p.total - prev.total,
+      perfMois: r * 100,
+      perfCum: (twrCumul - 1) * 100,
+    };
+  });
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STORAGE
@@ -214,13 +329,18 @@ function Section({ title, children, noPad, action }) {
   );
 }
 
-const TT = ({ active, payload, label, fmt }) => {
+const TT = ({ active, payload, label, fmt, extraRows }) => {
   if (!active||!payload?.length) return null;
-  return <div style={{ background:"#111",border:"1px solid #222",borderRadius:8,padding:"10px 14px",fontSize:12,minWidth:160 }}>
+  const extras = extraRows ? extraRows(payload[0]?.payload||{}) : [];
+  return <div style={{ background:"#111",border:"1px solid #222",borderRadius:8,padding:"10px 14px",fontSize:12,minWidth:180 }}>
     <div style={{ color:"#888",marginBottom:6,fontWeight:700 }}>{label}</div>
     {payload.map((p,i)=><div key={i} style={{ display:"flex",justifyContent:"space-between",gap:16,marginBottom:2 }}>
       <span style={{ color:"#666",fontSize:11 }}>{p.name}</span>
       <span style={{ fontWeight:700,color:p.color||"white" }}>{fmt?fmt(p.value):p.value}</span>
+    </div>)}
+    {extras.map((e,i)=><div key={"ex"+i} style={{ display:"flex",justifyContent:"space-between",gap:16,marginBottom:2,borderTop:"1px solid #222",paddingTop:4,marginTop:4 }}>
+      <span style={{ color:e.color||"#666",fontSize:11 }}>{e.label}</span>
+      <span style={{ fontWeight:700,color:e.color||"white" }}>{e.val}</span>
     </div>)}
   </div>;
 };
@@ -238,13 +358,15 @@ function GlobalTab({ timeline, annualPerf }) {
       <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(165px,1fr))",gap:10 }}>
         <KpiCard label="Total portefeuille" value={fmtEur(last.total)} sub={last.label}/>
         <KpiCard label={`Perf. depuis ${first.label}`} value={fmtPct(last.perfCum)} positive={last.perfCum>0} negative={last.perfCum<0}
-          tooltip="Performance cumulée non pondérée par les flux. Basée sur la variation de valorisation totale."/>
+          tooltip="TWR (Time-Weighted Return) cumulé — méthode Modified Dietz. Les apports et retraits détectés sont exclus du calcul : seule la performance des gérants est mesurée."/>
         {last.variation!==0 && <KpiCard label="Variation dernier mois" value={fmtEur(last.variation)} sub={fmtPct(last.perfMois)} positive={last.variation>0} negative={last.variation<0}/>}
         <KpiCard label="Historique" value={`${timeline.length} mois`} sub={`${first.label} → ${last.label}`}/>
       </div>
 
-      <Section title="Valorisation totale">
-        <ResponsiveContainer width="100%" height={230}>
+      <Section title="Valorisation totale" action={
+        <span style={{ fontSize:10,color:"#3B82F6" }}>🔵 = apport/retrait détecté — exclu du TWR</span>
+      }>
+        <ResponsiveContainer width="100%" height={280}>
           <AreaChart data={timeline} margin={{ left:10,right:10,top:5 }}>
             <defs><linearGradient id="gTotal" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%"  stopColor={UBS_RED} stopOpacity={0.25}/>
@@ -252,9 +374,15 @@ function GlobalTab({ timeline, annualPerf }) {
             </linearGradient></defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#161616"/>
             <XAxis dataKey="label" tick={{ fill:"#555",fontSize:10 }} interval="preserveStartEnd"/>
-            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v=>`${(v/1e6).toFixed(1)}M€`} width={60}/>
-            <Tooltip content={<TT fmt={fmtEur}/>}/>
-            <Area type="monotone" dataKey="total" name="Total" stroke={UBS_RED} strokeWidth={2.5} fill="url(#gTotal)" dot={false} activeDot={{ r:4,fill:UBS_RED }}/>
+            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v=>`${(v/1e6).toFixed(2)}M€`} width={65}/>
+            <Tooltip content={<TT fmt={v => fmtEur(v)} extraRows={p => p.isFluxEvent?[{label:"⚠️ Flux détecté",val:fmtEur(p.flux),color:"#3B82F6"}]:[]}/>}/>
+            <Area type="monotone" dataKey="total" name="Valorisation" stroke={UBS_RED} strokeWidth={2.5} fill="url(#gTotal)"
+              dot={(props) => {
+                const { cx, cy, payload } = props;
+                if (!payload?.isFluxEvent) return <circle key={props.key} cx={cx} cy={cy} r={2} fill={UBS_RED} stroke="none"/>;
+                return <circle key={props.key} cx={cx} cy={cy} r={6} fill="#3B82F6" stroke="#050505" strokeWidth={2}/>;
+              }}
+              activeDot={{ r:4,fill:UBS_RED }}/>
           </AreaChart>
         </ResponsiveContainer>
       </Section>
@@ -264,9 +392,9 @@ function GlobalTab({ timeline, annualPerf }) {
           <BarChart data={timeline} margin={{ left:10,right:10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#161616"/>
             <XAxis dataKey="label" tick={{ fill:"#555",fontSize:10 }} interval="preserveStartEnd"/>
-            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v=>`${(v/1e6).toFixed(1)}M€`} width={60}/>
+            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v=>`${(v/1e6).toFixed(2)}M€`} width={65}/>
             <Tooltip content={<TT fmt={fmtEur}/>}/>
-            <Legend wrapperStyle={{ fontSize:10,color:"#666" }}/>
+            <Legend wrapperStyle={{ fontSize:11,color:"#888",paddingTop:8 }}/>
             {COMPTES_LIST.map(c=><Bar key={c.id} dataKey={c.id} name={c.label} stackId="a" fill={c.color}/>)}
           </BarChart>
         </ResponsiveContainer>
@@ -274,10 +402,10 @@ function GlobalTab({ timeline, annualPerf }) {
 
       {timeline.length>1 && <Section title="Performance cumulée (%)">
         <ResponsiveContainer width="100%" height={160}>
-          <LineChart data={timeline} margin={{ left:10,right:10,top:5 }}>
+          <LineChart data={timeline} margin={{ left:10,right:20,top:5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#161616"/>
             <XAxis dataKey="label" tick={{ fill:"#555",fontSize:10 }} interval="preserveStartEnd"/>
-            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v=>`${v>=0?"+":""}${v.toFixed(1)}%`} width={55}/>
+            <YAxis tick={{ fill:"#555",fontSize:10 }} tickFormatter={v=>`${v>=0?"+":""}${v.toFixed(1)}%`} width={60}/>
             <Tooltip content={<TT fmt={fmtPct}/>}/>
             <ReferenceLine y={0} stroke="#333"/>
             <Line type="monotone" dataKey="perfCum" name="Perf. cumulée" stroke={UBS_RED} strokeWidth={2} dot={false} activeDot={{ r:4,fill:UBS_RED }}/>
@@ -288,7 +416,7 @@ function GlobalTab({ timeline, annualPerf }) {
       {annualPerf.length>0 && <Section title="Performance annuelle" noPad>
         <table style={{ width:"100%",borderCollapse:"collapse",fontSize:12 }}>
           <thead><tr style={{ borderBottom:"1px solid #1A1A1A",background:"#0A0A0A" }}>
-            {["Année","Début","Fin","Variation €","Variation %","Mois",...COMPTES_LIST.map(c=>c.label)].map((h,i)=>(
+            {["Année","Début","Fin","Variation €","TWR %","Apports/Retraits","Mois",...COMPTES_LIST.map(c=>c.label+" TWR")].map((h,i)=>(
               <th key={h} style={{ padding:"9px 14px",textAlign:i<1?"left":"right",fontSize:10,fontWeight:700,textTransform:"uppercase",color:"#555",letterSpacing:"0.07em",whiteSpace:"nowrap" }}>{h}</th>
             ))}
           </tr></thead>
@@ -302,6 +430,7 @@ function GlobalTab({ timeline, annualPerf }) {
                 <td style={{ padding:"9px 14px",textAlign:"right",color:"#888" }}>{fmtEur(a.fin)}</td>
                 <td style={{ padding:"9px 14px",textAlign:"right",fontWeight:700,color:a.variation>=0?"#10b981":UBS_RED }}>{fmtEur(a.variation)}</td>
                 <td style={{ padding:"9px 14px",textAlign:"right",fontWeight:700,color:a.pct>=0?"#10b981":UBS_RED }}>{a.pct!=null?fmtPct(a.pct):"—"}</td>
+                <td style={{ padding:"9px 14px",textAlign:"right",fontSize:11,color:a.fluxAnnuel>0?"#3B82F6":a.fluxAnnuel<0?"#F59E0B":"#444",fontStyle:"italic" }}>{a.fluxAnnuel?fmtEur(a.fluxAnnuel):"—"}</td>
                 <td style={{ padding:"9px 14px",textAlign:"right",color:"#555" }}>{a.snapshots}</td>
                 {COMPTES_LIST.map(c=>{ const cp=a.comptePerf[c.id]; return (
                   <td key={c.id} style={{ padding:"9px 14px",textAlign:"right",fontSize:11,color:cp?.pct>0?"#10b981":cp?.pct<0?UBS_RED:"#444" }}>
