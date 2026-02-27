@@ -102,19 +102,23 @@ const parsePositionsXLS = (buffer, filename) => {
 
 // ─── Calcul snapshots consolidés ─────────────────────────────────────────
 const buildSnapshots = (allParsed) => {
-  // Grouper par date
+  // Grouper par date — déduplication par (isin + classe)
+  // Si même fichier chargé 2x, la position écrase la précédente → pas de doublon
   const byDate = {};
   for (const parsed of allParsed) {
     if (!parsed.date) continue;
-    if (!byDate[parsed.date]) byDate[parsed.date] = [];
-    byDate[parsed.date].push(...parsed.positions);
+    if (!byDate[parsed.date]) byDate[parsed.date] = {};
+    for (const pos of parsed.positions) {
+      const key = `${pos.isin}__${pos.classe}`;
+      byDate[parsed.date][key] = pos;
+    }
   }
 
   // Trier par date
   const dates = Object.keys(byDate).sort();
 
   const snapshots = dates.map(date => {
-    const positions = byDate[date];
+    const positions = Object.values(byDate[date]);
     const total = positions.reduce((s,p) => s + p.montantEur, 0);
     const plTotal = positions.reduce((s,p) => s + (p.plEur || 0), 0);
 
