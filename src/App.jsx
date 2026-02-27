@@ -612,13 +612,48 @@ const TABS = [
   { id:"evolution",   label:"Évolution" },
 ];
 
+// ─── Storage persistant ───────────────────────────────────────────────────
+const STORAGE_KEY = "ubs-snapshots-v2";
+
+const saveToStorage = async (allParsed) => {
+  try {
+    const toSave = allParsed.map(p => ({ date: p.date, filename: p.filename, positions: p.positions }));
+    await window.storage.set(STORAGE_KEY, JSON.stringify(toSave));
+  } catch(e) { console.warn("Storage save error", e); }
+};
+
+const loadFromStorage = async () => {
+  try {
+    const result = await window.storage.get(STORAGE_KEY);
+    if (!result?.value) return [];
+    return JSON.parse(result.value);
+  } catch(e) { return []; }
+};
+
+const clearStorage = async () => {
+  try { await window.storage.delete(STORAGE_KEY); } catch(e) {}
+};
+
 export default function UBSAnalyzer() {
   const [allParsed, setAllParsed] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(false);
+  const [storageLoading, setStorageLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const dropRef = useRef(null);
+
+  // Charger depuis storage au démarrage
+  React.useEffect(() => {
+    (async () => {
+      const saved = await loadFromStorage();
+      if (saved.length > 0) {
+        setAllParsed(saved);
+        setSnapshots(buildSnapshots(saved));
+      }
+      setStorageLoading(false);
+    })();
+  }, []);
 
   const addFiles = useCallback(async (files) => {
     setLoading(true);
@@ -635,6 +670,7 @@ export default function UBSAnalyzer() {
       const merged = [...prev, ...newParsed];
       const snaps = buildSnapshots(merged);
       setSnapshots(snaps);
+      saveToStorage(merged);
       return merged;
     });
     setLoading(false);
@@ -645,7 +681,19 @@ export default function UBSAnalyzer() {
     addFiles(Array.from(e.dataTransfer.files));
   }, [addFiles]);
 
-  const reset = () => { setAllParsed([]); setSnapshots([]); setTab("overview"); };
+  const reset = async () => {
+    await clearStorage();
+    setAllParsed([]); setSnapshots([]); setTab("overview");
+  };
+
+  if (storageLoading) return (
+    <div style={{ minHeight:"100vh",background:BG,display:"flex",alignItems:"center",justifyContent:"center" }}>
+      <div style={{ textAlign:"center" }}>
+        <UBSLogo size={40} />
+        <div style={{ color:"#444",fontSize:12,marginTop:12 }}>Chargement des données sauvegardées…</div>
+      </div>
+    </div>
+  );
 
   // ── Écran d'accueil ────────────────────────────────────────────────────
   if (!snapshots.length) return (
